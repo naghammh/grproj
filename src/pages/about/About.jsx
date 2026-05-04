@@ -31,10 +31,16 @@ function About() {
   ];
 
   return (
-    <Box sx={{ backgroundColor: "#f5f5f5", py: 8 }}>
+    <Box
+      sx={{
+        bgcolor: "background.default",
+        color: "text.primary",
+        py: 8,
+        minHeight: "100vh",
+        transition: "background-color 0.25s ease, color 0.25s ease",
+      }}
+    >
       <Container maxWidth="lg">
-
-        {/* ================= Hero Section ================= */}
         <Box
           sx={{
             position: "relative",
@@ -49,26 +55,25 @@ function About() {
             overflow: "hidden",
           }}
         >
-          {/* Overlay */}
           <Box
             sx={{
               position: "absolute",
               inset: 0,
-              background: "rgba(0,0,0,0.4)",
+              background: "rgba(0,0,0,0.45)",
             }}
           />
 
           <Box sx={{ position: "relative", zIndex: 1 }}>
-            <Typography variant="h3" fontWeight="bold" color="white">
+            <Typography variant="h3" fontWeight="bold" color="#fff">
               About NutriLife
             </Typography>
-            <Typography variant="h6" color="white">
+
+            <Typography variant="h6" color="#fff">
               Your personalized path to a healthier lifestyle.
             </Typography>
           </Box>
         </Box>
 
-        {/* ================= Who We Are ================= */}
         <Grid container justifyContent="center" sx={{ mt: 8, mb: 8 }}>
           <Grid item xs={12} md={8}>
             <Card
@@ -77,11 +82,14 @@ function About() {
                 textAlign: "center",
                 borderRadius: 4,
                 boxShadow: 3,
+                bgcolor: "background.paper",
+                color: "text.primary",
               }}
             >
               <Typography variant="h5" fontWeight="bold" gutterBottom>
                 Who We Are
               </Typography>
+
               <Typography color="text.secondary">
                 NutriLife is a smart nutrition platform designed to make healthy
                 living simple and personalized. We combine expert guidance with
@@ -92,63 +100,63 @@ function About() {
           </Grid>
         </Grid>
 
-        {/* ================= Features ================= */}
-<Grid container spacing={4}>
-  {features.map((feature, index) => (
-    <Grid
-      key={index}
-      size={{ xs: 12, md: 4,}}
-      sx={{ display: "flex" }}
-    >
-      <Card
-        sx={{
-          flex: 1, // 🔥 أهم سطر
-          p: 4,
-          mb:4 ,
-          borderRadius: 3,
-          boxShadow: 3,
-          textAlign: "center",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          transition: "0.3s",
-          "&:hover": {
-            transform: "translateY(-6px)",
-            boxShadow: 6,
-          },
-        }}
-      >
-        <Typography variant="h6" fontWeight="bold" gutterBottom>
-          {feature.title}
-        </Typography>
+        <Grid container spacing={4}>
+          {features.map((feature, index) => (
+            <Grid key={index} size={{ xs: 12, md: 4 }} sx={{ display: "flex" }}>
+              <Card
+                sx={{
+                  flex: 1,
+                  p: 4,
+                  mb: 4,
+                  borderRadius: 3,
+                  boxShadow: 3,
+                  textAlign: "center",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  bgcolor: "background.paper",
+                  color: "text.primary",
+                  transition:
+                    "transform 0.3s ease, box-shadow 0.3s ease, background-color 0.25s ease, color 0.25s ease",
+                  "&:hover": {
+                    transform: "translateY(-6px)",
+                    boxShadow: 6,
+                  },
+                }}
+              >
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                  {feature.title}
+                </Typography>
 
-        <Typography variant="body2" color="text.secondary">
-          {feature.text}
-        </Typography>
-      </Card>
-    </Grid>
-  ))}
-</Grid>
+                <Typography variant="body2" color="text.secondary">
+                  {feature.text}
+                </Typography>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
 
-        {/* ================= CTA ================= */}
         <Box textAlign="center">
           <Button
             component={RouterLink}
             to="/register"
             variant="contained"
-            color="success"
             size="large"
             sx={{
               px: 5,
               py: 1.8,
               borderRadius: 3,
               fontWeight: "bold",
+              bgcolor: "primary.main",
+              color: "#fff",
+              "&:hover": {
+                bgcolor: "#1b5e20",
+              },
             }}
           >
             Start Your Healthy Journey
           </Button>
         </Box>
-
       </Container>
     </Box>
   );

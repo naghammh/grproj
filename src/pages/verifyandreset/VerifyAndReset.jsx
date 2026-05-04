@@ -12,7 +12,7 @@ import {
   IconButton,
   Alert,
   Snackbar,
-  Divider
+  Divider,
 } from "@mui/material";
 import { useLocation, useNavigate, Link as RouterLink } from "react-router-dom";
 import LockIcon from "@mui/icons-material/Lock";
@@ -34,7 +34,6 @@ export default function VerifyAndReset() {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
 
-  // ✅ Resend Timer
   const [resendTimer, setResendTimer] = useState(30);
   const [resendDisabled, setResendDisabled] = useState(true);
 
@@ -42,7 +41,6 @@ export default function VerifyAndReset() {
   const [message, setMessage] = useState("");
   const [severity, setSeverity] = useState("success");
 
-  // ✅ العداد بيشتغل لما تفتح الصفحة أو بعد كل resend
   useEffect(() => {
     if (!resendDisabled) return;
 
@@ -53,6 +51,7 @@ export default function VerifyAndReset() {
           setResendDisabled(false);
           return 30;
         }
+
         return prev - 1;
       });
     }, 1000);
@@ -60,17 +59,25 @@ export default function VerifyAndReset() {
     return () => clearInterval(interval);
   }, [resendDisabled]);
 
-  // ✅ Guard
   if (!email) {
     return (
-      <Box sx={{ py: 8, textAlign: "center" }}>
+      <Box
+        sx={{
+          py: 8,
+          minHeight: "80vh",
+          textAlign: "center",
+          bgcolor: "background.default",
+          color: "text.primary",
+        }}
+      >
         <Typography color="error">
           Session expired. Please start again.
         </Typography>
+
         <Button
           component={RouterLink}
           to="/forgot-password"
-          sx={{ mt: 2, color: "#16a34a" }}
+          sx={{ mt: 2, color: "primary.main" }}
         >
           Go to Forgot Password
         </Button>
@@ -78,7 +85,6 @@ export default function VerifyAndReset() {
     );
   }
 
-  // ✅ Validate
   const validate = () => {
     if (!code) return "Please enter the verification code";
     if (!/^\d{4}$/.test(code)) return "Code must be exactly 4 digits";
@@ -88,9 +94,9 @@ export default function VerifyAndReset() {
     return null;
   };
 
-  // ✅ Reset
   const handleReset = async () => {
     const error = validate();
+
     if (error) {
       setMessage(error);
       setSeverity("error");
@@ -109,12 +115,13 @@ export default function VerifyAndReset() {
           body: JSON.stringify({
             Email: email,
             Code: code,
-            NewPassword: password
-          })
+            NewPassword: password,
+          }),
         }
       );
 
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.message || "Reset failed");
 
       setMessage("Password reset successfully!");
@@ -124,7 +131,6 @@ export default function VerifyAndReset() {
       setTimeout(() => {
         navigate("/login");
       }, 1500);
-
     } catch (err) {
       setMessage(err.message || "Something went wrong");
       setSeverity("error");
@@ -134,7 +140,6 @@ export default function VerifyAndReset() {
     }
   };
 
-  // ✅ Resend
   const handleResend = async () => {
     try {
       setResendLoading(true);
@@ -144,21 +149,20 @@ export default function VerifyAndReset() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email }),
         }
       );
 
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.message || "Error");
 
       setMessage("Code resent! Check your inbox.");
       setSeverity("success");
       setOpen(true);
 
-      // ✅ أعد تشغيل العداد
       setResendDisabled(true);
       setResendTimer(30);
-
     } catch (err) {
       setMessage(err.message || "Failed to resend. Try again.");
       setSeverity("error");
@@ -175,24 +179,38 @@ export default function VerifyAndReset() {
         minHeight: "80vh",
         display: "flex",
         alignItems: "center",
-        backgroundColor: "#f5f5f5"
+        bgcolor: "background.default",
+        color: "text.primary",
       }}
     >
       <Container maxWidth="sm">
-        <Card sx={{ borderRadius: 4, boxShadow: 3, p: 3, textAlign: "center" }}>
+        <Card
+          sx={{
+            borderRadius: 4,
+            boxShadow: 3,
+            p: 3,
+            textAlign: "center",
+            bgcolor: "background.paper",
+            color: "text.primary",
+            backgroundImage: "none",
+            border: "1px solid",
+            borderColor: "divider",
+          }}
+        >
           <CardContent>
-
-            {/* Icon */}
             <Box
               sx={{
                 width: 60,
                 height: 60,
                 borderRadius: "50%",
-                backgroundColor: "#e8f5e9",
+                bgcolor: (theme) =>
+                  theme.palette.mode === "dark"
+                    ? "rgba(22, 163, 74, 0.18)"
+                    : "#e8f5e9",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                margin: "0 auto 20px"
+                margin: "0 auto 20px",
               }}
             >
               <LockResetIcon color="success" />
@@ -202,11 +220,11 @@ export default function VerifyAndReset() {
               Reset Your Password
             </Typography>
 
-            <Typography color="#22c55e" mb={3}>
-              Enter the code sent to <strong>{email}</strong> and your new password.
+            <Typography sx={{ color: "primary.main" }} mb={3}>
+              Enter the code sent to <strong>{email}</strong> and your new
+              password.
             </Typography>
 
-            {/* --- Section 1: Code --- */}
             <Typography
               variant="subtitle2"
               color="text.secondary"
@@ -230,32 +248,28 @@ export default function VerifyAndReset() {
                 style: {
                   textAlign: "left",
                   fontSize: "20px",
-                  
-                }
+                },
               }}
             />
 
-            {/* ✅ Resend Button مع العداد */}
             <Button
               onClick={handleResend}
               disabled={resendDisabled || resendLoading}
               sx={{
                 mt: 1,
                 fontSize: "13px",
-                color: resendDisabled ? "text.disabled" : "#16a34a"
+                color: resendDisabled ? "text.disabled" : "primary.main",
               }}
             >
               {resendLoading
                 ? "Sending..."
                 : resendDisabled
                 ? `Resend Code (${resendTimer}s)`
-                : "Resend Code"
-              }
+                : "Resend Code"}
             </Button>
 
             <Divider sx={{ my: 3 }} />
 
-            {/* --- Section 2: New Password --- */}
             <Typography
               variant="subtitle2"
               color="text.secondary"
@@ -280,11 +294,14 @@ export default function VerifyAndReset() {
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(!showPassword)}>
+                    <IconButton
+                      onClick={() => setShowPassword(!showPassword)}
+                      sx={{ color: "text.secondary" }}
+                    >
                       {showPassword ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
-                )
+                ),
               }}
             />
 
@@ -303,15 +320,17 @@ export default function VerifyAndReset() {
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowConfirm(!showConfirm)}>
+                    <IconButton
+                      onClick={() => setShowConfirm(!showConfirm)}
+                      sx={{ color: "text.secondary" }}
+                    >
                       {showConfirm ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
-                )
+                ),
               }}
             />
 
-            {/* Submit */}
             <Button
               fullWidth
               variant="contained"
@@ -321,7 +340,11 @@ export default function VerifyAndReset() {
                 mt: 3,
                 py: 1.3,
                 fontWeight: "bold",
-                backgroundColor: "#16a34a"
+                bgcolor: "primary.main",
+                color: "#fff",
+                "&:hover": {
+                  bgcolor: "#15803d",
+                },
               }}
             >
               {loading ? "Resetting..." : "Reset Password"}
@@ -332,12 +355,11 @@ export default function VerifyAndReset() {
                 component={RouterLink}
                 to="/forgot-password"
                 underline="hover"
-                color="success.main"
+                sx={{ color: "primary.main" }}
               >
                 ← Back to Forgot Password
               </Link>
             </Box>
-
           </CardContent>
         </Card>
 
@@ -350,7 +372,6 @@ export default function VerifyAndReset() {
             {message}
           </Alert>
         </Snackbar>
-
       </Container>
     </Box>
   );

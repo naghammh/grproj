@@ -12,7 +12,7 @@ import {
   InputAdornment,
   IconButton,
   Snackbar,
-  Alert
+  Alert,
 } from "@mui/material";
 
 import EmailIcon from "@mui/icons-material/Email";
@@ -21,9 +21,6 @@ import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 
 import axios from "axios";
-
-
-
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 
 export default function Login() {
@@ -31,8 +28,9 @@ export default function Login() {
 
   const [formData, setFormData] = useState({
     email: "",
-    password: ""
+    password: "",
   });
+
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -60,10 +58,9 @@ export default function Login() {
     setErrorMessage("");
 
     try {
-      // ✅ axios POST request
       const bodyData = {
         Email: email.trim(),
-        Password: password.trim()
+        Password: password.trim(),
       };
 
       const res = await axios.post(
@@ -72,25 +69,24 @@ export default function Login() {
         { headers: { "Content-Type": "application/json" } }
       );
 
-      console.log("Response:", res.data);
-
       const result = res.data;
       localStorage.setItem("token", result.accessToken);
-      const payload = JSON.parse(atob(result.accessToken.split(".")[1]));
-      console.log("Payload:", payload);
 
-      const role = payload["http://schemas.microsoft.com/ws/2008/06/identity/claims/role"];
+      const payload = JSON.parse(atob(result.accessToken.split(".")[1]));
+      const role =
+        payload["http://schemas.microsoft.com/ws/2008/06/identity/claims/role"];
 
       if (role === "Client") navigate("/clientdashboard");
       else if (role === "Admin") navigate("/admindashboard");
-      else if (role === "Specialist") navigate("/specialistdashboard");
+      else if (role === "Nutritionist") navigate("/specialistdashboard");
       else navigate("/");
-
     } catch (error) {
       console.error(error);
 
       if (error.response && error.response.data) {
-        setErrorMessage(error.response.data.message || "Invalid email or password ❌");
+        setErrorMessage(
+          error.response.data.message || "Invalid email or password ❌"
+        );
       } else {
         setErrorMessage("Something went wrong 🚨");
       }
@@ -108,27 +104,42 @@ export default function Login() {
         minHeight: "80vh",
         display: "flex",
         alignItems: "center",
-        backgroundColor: "#f5f5f5"
+        bgcolor: "background.default",
+        color: "text.primary",
+        transition: "background-color 0.25s ease, color 0.25s ease",
       }}
     >
       <Container maxWidth="sm">
-        <Card sx={{ borderRadius: 4, boxShadow: 3, p: 3 }}>
+        <Card
+          sx={{
+            borderRadius: 4,
+            boxShadow: 3,
+            p: 3,
+            bgcolor: "background.paper",
+            color: "text.primary",
+          }}
+        >
           <CardContent>
-            <Typography variant="h4" textAlign="center" fontWeight="bold" gutterBottom>
+            <Typography
+              variant="h4"
+              textAlign="center"
+              fontWeight="bold"
+              gutterBottom
+            >
               Welcome Back
             </Typography>
+
             <Typography textAlign="center" color="text.secondary" mb={4}>
               Log in to continue your healthy journey.
             </Typography>
 
             <form onSubmit={handleSubmit}>
-              {/* Email */}
               <TextField
                 fullWidth
                 label="Email address"
                 placeholder="name@example.com"
                 margin="normal"
-                name="email"  // ✅ name لكل حقل
+                name="email"
                 value={formData.email}
                 onChange={handleChange}
                 InputProps={{
@@ -136,17 +147,16 @@ export default function Login() {
                     <InputAdornment position="start">
                       <EmailIcon color="success" />
                     </InputAdornment>
-                  )
+                  ),
                 }}
               />
 
-              {/* Password */}
               <TextField
                 fullWidth
                 label="Password"
                 type={showPassword ? "text" : "password"}
                 margin="normal"
-                name="password"  // ✅ name لكل حقل
+                name="password"
                 value={formData.password}
                 onChange={handleChange}
                 InputProps={{
@@ -157,11 +167,14 @@ export default function Login() {
                   ),
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton onClick={() => setShowPassword(!showPassword)}>
+                      <IconButton
+                        onClick={() => setShowPassword(!showPassword)}
+                        sx={{ color: "text.secondary" }}
+                      >
                         {showPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
                     </InputAdornment>
-                  )
+                  ),
                 }}
               />
 
@@ -170,7 +183,7 @@ export default function Login() {
                   component={RouterLink}
                   to="/forgot-password"
                   underline="hover"
-                  color="success.main"
+                  sx={{ color: "primary.main" }}
                 >
                   Forgot password?
                 </Link>
@@ -181,13 +194,22 @@ export default function Login() {
                 variant="contained"
                 fullWidth
                 disabled={loading}
-                sx={{ mt: 3, py: 1.4, fontWeight: "bold", backgroundColor: "#16a34a" }}
+                sx={{
+                  mt: 3,
+                  py: 1.4,
+                  fontWeight: "bold",
+                  bgcolor: "primary.main",
+                  color: "#fff",
+                  "&:hover": {
+                    bgcolor: "#1b5e20",
+                  },
+                }}
               >
                 {loading ? "Logging in..." : "Log In"}
               </Button>
             </form>
 
-            <Divider sx={{ my: 3 }}>OR</Divider>
+            <Divider sx={{ my: 3, color: "text.secondary" }}>OR</Divider>
 
             <Typography textAlign="center">
               Don’t have an account?{" "}
@@ -195,8 +217,7 @@ export default function Login() {
                 component={RouterLink}
                 to="/register"
                 underline="hover"
-                color="success.main"
-                fontWeight="bold"
+                sx={{ color: "primary.main", fontWeight: "bold" }}
               >
                 Sign Up
               </Link>
@@ -205,7 +226,6 @@ export default function Login() {
         </Card>
       </Container>
 
-      {/* Snackbar للأخطاء */}
       <Snackbar
         open={openSnackbar}
         autoHideDuration={4000}

@@ -11,10 +11,11 @@ import {
   ListItem,
   ListItemButton,
   ListItemText,
+  Typography
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 
-import Logo from "../../assets/images/Logo.png";
+import Logo1 from "../../assets/images/Logo1.png";
 import aitool from "../../assets/images/aitool.png";
 
 function Navbar() {
@@ -32,86 +33,173 @@ function Navbar() {
 
   return (
     <>
-<AppBar
-  position="sticky"
-  color="inherit"
-  elevation={0} 
-  sx={{
-    boxShadow: "0 5px 30px rgba(0, 0, 0, 0.1)" // ظل خفيف من تحت فقط
-  }}
->        <Toolbar sx={{ display: "flex", alignItems: "center" }}>
-  
-  {/* Left - Logo */}
-  <Box sx={{ flex: 1 }}>
-    <Box component={Link} to="/">
-      <img src={Logo} alt="Logo" height="50" />
-    </Box>
-  </Box>
-
-  {/* Center - Nav Links */}
-  <Box
-    sx={{
-      display: { xs: "none", md: "flex" },
-      gap: 3,
-      justifyContent: "center",
-      flex: 1,
-    }}
-  >
-    {navLinks.map((item) => (
-      <Button
-        key={item.text}
-        component={Link}
-        to={item.path}
-        color="inherit"
+      <AppBar
+        position="sticky"
+        elevation={0}
+        sx={{
+          bgcolor: "background.paper",
+          color: "text.primary",
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          boxShadow: (theme) =>
+            theme.palette.mode === "dark"
+              ? "0 5px 30px rgba(0, 0, 0, 0.35)"
+              : "0 5px 30px rgba(0, 0, 0, 0.08)",
+          transition:
+            "background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease",
+        }}
       >
-        {item.text}
-      </Button>
-    ))}
-
-    {/* AI Tool Image */}
-    <Box component={Link} to="/ai-tool">
-      <img src={aitool} alt="AI Tool" height="30" />
-    </Box>
-  </Box>
-
-  {/* Right - Auth Buttons */}
+        <Toolbar sx={{ display: "flex", alignItems: "center" }}>
+        <Box sx={{ flex: 1 }}>
   <Box
+    component={Link}
+    to="/"
     sx={{
-      display: { xs: "none", md: "flex" },
-      gap: 2,
-      justifyContent: "flex-end",
-      flex: 1,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 1,
+      textDecoration: "none",
+      color: "text.primary",
+      "&:hover": {
+        textDecoration: "none",
+      },
     }}
   >
-    <Button component={Link} to="/login" color="inherit">
-      Login
-    </Button>
+    <img src={Logo1} alt="Logo" height="50" />
 
-    <Button
-      component={Link}
-      to="/register"
-      variant="contained"
-      color="success"
+    <Typography
+      component="span"
+      sx={{
+        color: "text.primary",
+        fontSize: 24,
+        fontWeight: 400,
+        textDecoration: "none",
+      }}
     >
-      Sign Up
-    </Button>
+      NutriLife
+    </Typography>
   </Box>
+</Box>
 
-  {/* Mobile Menu Button */}
-  <IconButton
-    edge="end"
-    color="inherit"
-    sx={{ display: { md: "none" } }}
-    onClick={toggleDrawer(true)}
-  >
-    <MenuIcon />
-  </IconButton>
-</Toolbar>
+
+          <Box
+            sx={{
+              display: { xs: "none", md: "flex" },
+              gap: 3,
+              justifyContent: "center",
+              alignItems: "center",
+              flex: 1,
+            }}
+          >
+            {navLinks.map((item) => (
+              <Button
+                key={item.text}
+                component={Link}
+                to={item.path}
+                sx={{
+                  color: "text.primary",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  "&:hover": {
+                    color: "primary.main",
+                    bgcolor: "transparent",
+                  },
+                }}
+              >
+                {item.text}
+              </Button>
+            ))}
+
+            <Box
+              component={Link}
+              to="/ai-tool"
+              sx={{
+                display: "inline-flex",
+                alignItems: "center",
+                px: 1.5,
+                py: 0.5,
+                borderRadius: 999,
+                bgcolor: (theme) =>
+                  theme.palette.mode === "dark"
+                    ? "rgba(46, 125, 50, 0.18)"
+                    : "rgba(46, 125, 50, 0.08)",
+              }}
+            >
+              <img src={aitool} alt="AI Tool" height="30" />
+            </Box>
+          </Box>
+
+          <Box
+            sx={{
+              display: { xs: "none", md: "flex" },
+              gap: 2,
+              justifyContent: "flex-end",
+              alignItems: "center",
+              flex: 1,
+            }}
+          >
+            <Button
+              component={Link}
+              to="/login"
+              sx={{
+                color: "text.primary",
+                fontWeight: 700,
+                "&:hover": {
+                  color: "primary.main",
+                  bgcolor: "transparent",
+                },
+              }}
+            >
+              Login
+            </Button>
+
+            <Button
+              component={Link}
+              to="/register"
+              variant="contained"
+              sx={{
+                bgcolor: "primary.main",
+                color: "#fff",
+                fontWeight: 700,
+                px: 3,
+                "&:hover": {
+                  bgcolor: "#1b5e20",
+                },
+              }}
+            >
+              Sign Up
+            </Button>
+          </Box>
+
+          <IconButton
+            edge="end"
+            sx={{
+              display: { md: "none" },
+              color: "text.primary",
+            }}
+            onClick={toggleDrawer(true)}
+          >
+            <MenuIcon />
+          </IconButton>
+        </Toolbar>
       </AppBar>
 
-      {/* Mobile Drawer */}
-      <Drawer anchor="right" open={open} onClose={toggleDrawer(false)}>
-        <Box sx={{ width: 250 }} role="presentation" onClick={toggleDrawer(false)}>
+      <Drawer
+        anchor="right"
+        open={open}
+        onClose={toggleDrawer(false)}
+        PaperProps={{
+          sx: {
+            bgcolor: "background.paper",
+            color: "text.primary",
+          },
+        }}
+      >
+        <Box
+          sx={{ width: 250 }}
+          role="presentation"
+          onClick={toggleDrawer(false)}
+        >
           <List>
             {navLinks.map((item) => (
               <ListItem key={item.text} disablePadding>
@@ -128,7 +216,7 @@ function Navbar() {
             </ListItem>
 
             <ListItem disablePadding>
-              <ListItemButton component={Link} to="/signup">
+              <ListItemButton component={Link} to="/register">
                 <ListItemText primary="Sign Up" />
               </ListItemButton>
             </ListItem>

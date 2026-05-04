@@ -10,7 +10,7 @@ import {
   Link,
   InputAdornment,
   Alert,
-  Snackbar
+  Snackbar,
 } from "@mui/material";
 
 import EmailIcon from "@mui/icons-material/Email";
@@ -18,7 +18,6 @@ import LockResetIcon from "@mui/icons-material/LockReset";
 
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 
-// ✅ Email validation
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 export default function ForgotPassword() {
@@ -31,7 +30,6 @@ export default function ForgotPassword() {
   const [message, setMessage] = useState("");
   const [severity, setSeverity] = useState("success");
 
-  // ✅ Send Code
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -42,7 +40,6 @@ export default function ForgotPassword() {
       return;
     }
 
-    // ✅ تحقق من صيغة الإيميل
     if (!isValidEmail(email)) {
       setMessage("Please enter a valid email address");
       setSeverity("error");
@@ -58,22 +55,21 @@ export default function ForgotPassword() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email }),
         }
       );
 
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.message || "Error");
 
       setMessage("Code sent successfully!");
       setSeverity("success");
       setOpen(true);
 
-      // ✅ انتظر يشوف الرسالة ثم انتقل
       setTimeout(() => {
         navigate("/verify-and-reset", { state: { email } });
       }, 1500);
-
     } catch (error) {
       setMessage(error.message || "Something went wrong");
       setSeverity("error");
@@ -90,53 +86,55 @@ export default function ForgotPassword() {
         minHeight: "80vh",
         display: "flex",
         alignItems: "center",
-        backgroundColor: "#f5f5f5"
+        bgcolor: "background.default",
+        color: "text.primary",
+        transition: "background-color 0.25s ease, color 0.25s ease",
       }}
     >
       <Container maxWidth="sm">
-
         <Card
           sx={{
             borderRadius: 4,
             boxShadow: 3,
             p: 3,
-            textAlign: "center"
+            textAlign: "center",
+            bgcolor: "background.paper",
+            color: "text.primary",
           }}
         >
           <CardContent>
-
-            {/* Icon */}
             <Box
               sx={{
                 width: 60,
                 height: 60,
                 borderRadius: "50%",
-                backgroundColor: "#e8f5e9",
+                bgcolor: (theme) =>
+                  theme.palette.mode === "dark"
+                    ? "rgba(46, 125, 50, 0.2)"
+                    : "#e8f5e9",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                margin: "0 auto 20px"
+                margin: "0 auto 20px",
               }}
             >
               <LockResetIcon color="success" />
             </Box>
 
-            {/* Title */}
             <Typography variant="h5" fontWeight="bold" gutterBottom>
               Forgot Your Password?
             </Typography>
 
             <Typography color="text.secondary" mb={3}>
-              Enter your email address and we'll send you a recovery code to reset your account.
+              Enter your email address and we'll send you a recovery code to
+              reset your account.
             </Typography>
 
-            {/* Form */}
             <form onSubmit={handleSubmit}>
-
               <TextField
                 fullWidth
                 label="Email Address"
-                placeholder="e.g. alex@example.com"
+                placeholder="name@example.com"
                 margin="normal"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -145,11 +143,10 @@ export default function ForgotPassword() {
                     <InputAdornment position="start">
                       <EmailIcon color="success" />
                     </InputAdornment>
-                  )
+                  ),
                 }}
               />
 
-              {/* Send Button */}
               <Button
                 type="submit"
                 variant="contained"
@@ -159,32 +156,30 @@ export default function ForgotPassword() {
                   mt: 3,
                   py: 1.3,
                   fontWeight: "bold",
-                  backgroundColor: "#16a34a"
+                  bgcolor: "primary.main",
+                  color: "#fff",
+                  "&:hover": {
+                    bgcolor: "#1b5e20",
+                  },
                 }}
               >
                 {loading ? "Sending..." : "Send Code"}
               </Button>
-
             </form>
 
-            {/* Back to login */}
             <Box mt={2}>
               <Link
                 component={RouterLink}
                 to="/login"
                 underline="hover"
-                color="success.main"
+                sx={{ color: "primary.main" }}
               >
                 ← Back to Login
               </Link>
             </Box>
-
           </CardContent>
         </Card>
 
-     
-
-        {/* Snackbar */}
         <Snackbar
           open={open}
           autoHideDuration={3000}
@@ -194,7 +189,6 @@ export default function ForgotPassword() {
             {message}
           </Alert>
         </Snackbar>
-
       </Container>
     </Box>
   );
