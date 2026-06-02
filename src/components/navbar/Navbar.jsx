@@ -26,9 +26,9 @@ function Navbar() {
   };
 
   const navLinks = [
-    { text: "Home", path: "/" },
-    { text: "Specialists", path: "/specialists" },
+    { text: "Home", path: "/" },  
     { text: "About Us", path: "/about" },
+     { text: "FAQ", path: "/faq" },
   ];
 
   return (

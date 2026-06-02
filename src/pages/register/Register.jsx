@@ -158,9 +158,12 @@ function Register() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  
+    setFormData((prev) => ({
+      ...prev,
+      [name]: typeof value === "string" ? value.trimStart() : value,
+    }));
   };
-
   const handleCloseSnackbar = () => setOpen(false);
 
   const strongPasswordRegex =
@@ -173,6 +176,11 @@ function Register() {
       return false;
     }
 
+    if (formData.UserName.length < 3) {
+      setMessage("Username must be at least 3 characters");
+      setOpen(true);
+      return false;
+    }
     if (formData.UserName.length < 3) {
       setMessage("Username must be at least 3 characters");
       setOpen(true);
@@ -364,21 +372,29 @@ function Register() {
           ? "https://nutrilife.runasp.net/api/Account/register/nutritionist"
           : "https://nutrilife.runasp.net/api/Account/Register";
 
-      const response = await axios.post(url, finalData);
-      console.log("API Response:", response.data);
+          const response = await axios.post(url, finalData);
 
-      setMessage("Account created successfully!");
-      setSeverity("success");
-      setOpen(true);
-
-      if (type === "specialist") {
-        localStorage.setItem(
-          "justRegisteredSpecialist",
-          JSON.stringify(finalData)
-        );
-      }
-
-      setTimeout(() => navigate("/login"), 1500);
+          console.log("API Response:", response.data);
+          
+          if (response.data.success === false) {
+            setMessage(response.data.message || "Registration failed");
+            setSeverity("error");
+            setOpen(true);
+            return;
+          }
+          
+          setMessage("Account created successfully!");
+          setSeverity("success");
+          setOpen(true);
+          
+          if (type === "specialist") {
+            localStorage.setItem(
+              "justRegisteredSpecialist",
+              JSON.stringify(finalData)
+            );
+          }
+          
+          setTimeout(() => navigate("/login"), 1500);
     } catch (error) {
       console.error("Registration error:", error);
 

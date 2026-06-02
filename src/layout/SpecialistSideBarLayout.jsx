@@ -1,9 +1,8 @@
 import React from "react";
 import { Box, Typography } from "@mui/material";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import AIBodyAnalysis from './../pages/aIBodyAnalysis/AIBodyAnalysis';
 
-export default function ClientSideBarLayout() {
+export default function SpecialistSideBarLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -51,67 +50,63 @@ export default function ClientSideBarLayout() {
         </Typography>
 
         <Typography
-          sx={linkStyle("/clientdashboard")}
-          onClick={() => navigate("/clientdashboard")}
+          sx={linkStyle("/SpecialistDashboard")}
+          onClick={() => navigate("/specialistDashboard")}
         >
           Dashboard
         </Typography>
 
         <Typography
-          sx={linkStyle("/clientmessages")}
-          onClick={() => navigate("/clientmessages")}
+          sx={linkStyle("/specialistMessages")}
+          onClick={() => navigate("/specialistMessages")}
         >
           Messages
         </Typography>
 
         <Typography
-          sx={linkStyle("/specialists")}
-          onClick={() => navigate("/specialists")}
+          sx={linkStyle("/plans")}
+          onClick={() => navigate("/plans")}
         >
-          Find Specialist
+          Plans
         </Typography>
 
         <Typography
-          sx={linkStyle("/myprogram")}
-          onClick={() => navigate("/myprogram")}
+          sx={linkStyle("/clients")}
+          onClick={() => navigate("/clients")}
         >
-          My Program
-        </Typography>
-        
-        <Typography
-          sx={linkStyle("/AIBodyAnalysis")}
-          onClick={() => navigate("/aIBodyAnalysis")}
-        >
-          AI Body Analysis
+          Clients
         </Typography>
 
         <Typography
-          sx={linkStyle("/myreservation")}
-          onClick={() => navigate("/myreservation")}
+          sx={linkStyle("/programs")}
+          onClick={() => navigate("/programs")}
         >
-          My Reservation
+           Programs
         </Typography>
 
         <Typography
-          sx={linkStyle("/clientRecipes")}
-          onClick={() => navigate("/clientRecipes")}
+          sx={linkStyle("/appointments")}
+          onClick={() => navigate("/appointments")}
+        >
+          Appointments
+        </Typography>
+
+        <Typography
+          sx={linkStyle("/specialistRecipes")}
+          onClick={() => navigate("/specialistRecipes")}
         >
           Recipes
         </Typography>
 
-        <Typography
-          sx={linkStyle("/progress")}
-          onClick={() => navigate("/progress")}
-        >
-          Progress
-        </Typography>
+        
 
         <Typography
-          sx={linkStyle("/clientsettings")}
-          onClick={() => navigate("/clientsettings")}
+          sx={linkStyle("/specialistsettings")}
+          onClick={() => navigate("/specialistsettings")}
         >
           Settings
         </Typography>
+
       </Box>
 
       <Box

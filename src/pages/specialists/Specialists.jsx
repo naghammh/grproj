@@ -22,11 +22,34 @@ export default function Specialists() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // ✅ NEW: function لجلب صورة الأخصائي
+  const getSpecialistImage = async (id) => {
+    try {
+      const res = await axios.get(
+        `https://nutrilife.runasp.net/api/Account/GetProfileImg/${id}`,
+        { responseType: "blob" }
+      );
+      return URL.createObjectURL(res.data);
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     axios
       .get("https://nutrilife.runasp.net/api/Account/allNutritionists")
-      .then((res) => {
-        setSpecialists(res.data);
+      .then(async (res) => {
+        const data = res.data;
+
+        // ✅ NEW: إضافة صورة لكل أخصائي
+        const withImages = await Promise.all(
+          data.map(async (spec) => {
+            const image = await getSpecialistImage(spec.id);
+            return { ...spec, image };
+          })
+        );
+
+        setSpecialists(withImages);
         setLoading(false);
       })
       .catch((err) => {
@@ -103,9 +126,17 @@ export default function Specialists() {
 
         <Grid container spacing={3}>
           {filtered.map((spec) => (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={spec.id}>
+           <Grid
+           size={{ xs: 12, sm: 6, md: 4 }}
+           key={spec.id}
+           sx={{ display: "flex" }}
+         >
               <Card
                 sx={{
+                  width: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
                   borderRadius: 3,
                   textAlign: "center",
                   py: 3,
@@ -124,27 +155,39 @@ export default function Specialists() {
                 }}
               >
                 <CardContent>
+                  {/* ✅ التعديل الوحيد هنا */}
                   <Avatar
+                    src={spec.image || undefined}
                     sx={{
                       width: 80,
                       height: 80,
                       margin: "auto",
-                      mb: 2,
+                      mb: 1,
                       bgcolor: "primary.main",
                       color: "#fff",
                       fontSize: 30,
                     }}
                   >
-                    {spec.fullName?.charAt(0)}
+                    {!spec.image && spec.fullName?.charAt(0)}
                   </Avatar>
 
                   <Typography variant="h6" fontWeight="bold">
                     {spec.fullName}
                   </Typography>
 
-                  <Typography color="text.secondary" mb={1}>
-                    {spec.specialization}
-                  </Typography>
+                  <Typography
+                      color="text.secondary"
+                      mb={1}
+                      sx={{
+                        minHeight: 48,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {spec.specialization}
+                    </Typography>
 
                   <Typography
                     fontSize={14}

@@ -33,15 +33,63 @@ export default function Login() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
   const [openSnackbar, setOpenSnackbar] = useState(false);
+
+  const [resendLoading, setResendLoading] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
-  const handleCloseSnackbar = () => setOpenSnackbar(false);
+  const handleCloseSnackbar = () => {
+    setOpenSnackbar(false);
+    setErrorMessage("");
+    setSuccessMessage("");
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!formData.email.trim()) {
+      setErrorMessage("Please enter your email first");
+      setOpenSnackbar(true);
+      return;
+    }
+
+    try {
+      setResendLoading(true);
+
+      const res = await axios.post(
+        "https://nutrilife.runasp.net/api/Account/resend-confirmation-email",
+        {
+          Email: formData.email.trim(),
+        }
+      );
+
+      console.log(res.data);
+
+      setSuccessMessage("Confirmation email sent successfully ✅");
+      setOpenSnackbar(true);
+    } catch (error) {
+      console.error(error);
+
+      setErrorMessage(
+        error.response?.data?.message ||
+          "Failed to resend confirmation email ❌"
+      );
+
+      setOpenSnackbar(true);
+    } finally {
+      setResendLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -66,20 +114,33 @@ export default function Login() {
       const res = await axios.post(
         "https://nutrilife.runasp.net/api/Account/login",
         bodyData,
-        { headers: { "Content-Type": "application/json" } }
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
       const result = res.data;
+
       localStorage.setItem("token", result.accessToken);
 
       const payload = JSON.parse(atob(result.accessToken.split(".")[1]));
-      const role =
-        payload["http://schemas.microsoft.com/ws/2008/06/identity/claims/role"];
 
-      if (role === "Client") navigate("/clientdashboard");
-      else if (role === "Admin") navigate("/admindashboard");
-      else if (role === "Nutritionist") navigate("/specialistdashboard");
-      else navigate("/");
+      const role =
+        payload[
+          "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+        ];
+
+      if (role === "Client") {
+        navigate("/clientdashboard");
+      } else if (role === "Admin") {
+        navigate("/admindashboard");
+      } else if (role === "Nutritionist") {
+        navigate("/specialistdashboard");
+      } else {
+        navigate("/");
+      }
     } catch (error) {
       console.error(error);
 
@@ -178,7 +239,12 @@ export default function Login() {
                 }}
               />
 
-              <Box textAlign="right" mt={1}>
+              <Box
+                display="flex"
+                justifyContent="space-between"
+                alignItems="center"
+                mt={1}
+              >
                 <Link
                   component={RouterLink}
                   to="/forgot-password"
@@ -187,6 +253,21 @@ export default function Login() {
                 >
                   Forgot password?
                 </Link>
+
+                <Button
+                  onClick={handleResendConfirmation}
+                  disabled={resendLoading}
+                  size="small"
+                  sx={{
+                    textTransform: "none",
+                    color: "primary.main",
+                    fontWeight: 600,
+                  }}
+                >
+                  {resendLoading
+                    ? "Sending..."
+                    : "Resend confirmation email"}
+                </Button>
               </Box>
 
               <Button
@@ -232,8 +313,11 @@ export default function Login() {
         onClose={handleCloseSnackbar}
         anchorOrigin={{ vertical: "top", horizontal: "center" }}
       >
-        <Alert severity="error" onClose={handleCloseSnackbar}>
-          {errorMessage}
+        <Alert
+          severity={successMessage ? "success" : "error"}
+          onClose={handleCloseSnackbar}
+        >
+          {successMessage || errorMessage}
         </Alert>
       </Snackbar>
     </Box>

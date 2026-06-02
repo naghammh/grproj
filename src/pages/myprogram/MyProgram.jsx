@@ -1,88 +1,328 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   Paper,
   Typography,
   Grid,
   Card,
-  CardContent,
   Chip,
   LinearProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Avatar,
+  CircularProgress,
+  Alert,
   IconButton,
 } from "@mui/material";
+
 import {
-  ExpandMore as ExpandMoreIcon,
   CheckCircle as CheckCircleIcon,
   RadioButtonUnchecked as UncheckedIcon,
-  FitnessCenter as ExerciseIcon,
   WaterDrop as WaterIcon,
   Today as TodayIcon,
 } from "@mui/icons-material";
 
-function MyProgram() {
-  const [expandedDay, setExpandedDay] = useState(null);
+import axios from "axios";
 
-  const program = {
-    startDate: "2026-01-15",
-    endDate: "2026-02-15",
-    nutritionist: {
-      name: "Dr.sara",
-      image: "https://randomuser.me/api/portraits/men/1.jpg",
-    },
-    weeklyPlan: [
-      {
-        day: "saturday",
-        date: "2026-01-20",
-        meals: [
-          { name: "الإفطار", time: "8:00 ص", foods: "شوفان مع حليب لوز + موز", calories: 350, completed: true },
-          { name: "وجبة خفيفة", time: "11:00 ص", foods: "تفاحة + 10 حبات لوز", calories: 150, completed: true },
-          { name: "الغداء", time: "2:00 م", foods: "صدر دجاج مشوي + أرز بني + سلطة", calories: 550, completed: false },
-          { name: "وجبة خفيفة", time: "5:00 م", foods: "زبادي يوناني", calories: 120, completed: false },
-          { name: "العشاء", time: "8:00 م", foods: "سمك مشوي + خضار مشوية", calories: 400, completed: false },
-        ],
-        waterIntake: 3,
-        waterGoal: 8,
-        exercises: ["مشي 30 دقيقة", "تمارين إطالة"],
-      },
-      {
-        day: "sunday",
-        date: "2026-01-21",
-        meals: [
-          { name: "الإفطار", time: "8:00 ص", foods: "بيض مسلوق + توست أسمر", calories: 300, completed: false },
-          { name: "وجبة خفيفة", time: "11:00 ص", foods: "برتقالة", calories: 80, completed: false },
-          { name: "الغداء", time: "2:00 م", foods: "لحم مشوي + بطاطا حلوة", calories: 600, completed: false },
-          { name: "وجبة خفيفة", time: "5:00 م", foods: "حفنة مكسرات", calories: 200, completed: false },
-          { name: "العشاء", time: "8:00 م", foods: "سلطة تونة", calories: 350, completed: false },
-        ],
-        waterIntake: 0,
-        waterGoal: 8,
-        exercises: ["تمارين مقاومة 20 دقيقة"],
-      },
-    ],
-    dailyGoal: {
-      calories: 2500,
-      protein: 120,
-      carbs: 250,
-      fats: 70,
-    },
+export default function MyProgram() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [program, setProgram] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      setError("No authentication token found");
+      setLoading(false);
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        // Safe token decode
+        let decoded = {};
+
+        try {
+          decoded = JSON.parse(atob(token.split(".")[1]));
+        } catch {
+          throw new Error("Invalid token");
+        }
+
+        const clientId =
+          decoded[
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+          ];
+
+        if (!clientId) {
+          throw new Error("Client ID not found in token");
+        }
+
+        // Fetch client plans
+        const plansRes = await axios.get(
+          `https://nutrilife.runasp.net/api/MealPlan/clientPlansS/${clientId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        console.log("Plans response:", plansRes.data);
+
+        const plans = plansRes.data;
+
+        // No plans yet
+        if (!plans || plans.length === 0) {
+          setProgram({
+            startDate: null,
+            endDate: null,
+            nutritionist: {
+              name: "No Nutritionist Yet",
+              image:
+                "https://cdn-icons-png.flaticon.com/512/2922/2922510.png",
+            },
+            weeklyPlan: [],
+            dailyGoal: {
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fats: 0,
+            },
+          });
+
+          setLoading(false);
+          return;
+        }
+
+        // Current plan
+        const currentPlan = plans[0];
+        const planId = currentPlan.id || currentPlan.planId;
+
+        // Fetch plan details
+        const planDetailsRes = await axios.get(
+          `https://nutrilife.runasp.net/api/MealPlan/getplan/${planId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        console.log("Plan details:", planDetailsRes.data);
+
+        const planData = planDetailsRes.data;
+
+        // Fetch nutritionist info
+        let nutritionist = null;
+
+        if (planData.nutritionistId) {
+          try {
+            const nutriRes = await axios.get(
+              `https://nutrilife.runasp.net/api/NutritionistPlans/GetNutri/${planData.nutritionistId}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }
+            );
+
+            nutritionist = nutriRes.data;
+          } catch (err) {
+            console.warn("Could not fetch nutritionist:", err);
+          }
+        }
+
+        const weeklyPlan = planData.weeklyPlan || planData.days || [];
+
+        const dailyGoal = {
+          calories:
+            planData.goalCalories ||
+            currentPlan.goalCalories ||
+            2000,
+
+          protein:
+            planData.proteinGoal ||
+            currentPlan.protein ||
+            0,
+
+          carbs:
+            planData.carbsGoal ||
+            currentPlan.carbs ||
+            0,
+
+          fats:
+            planData.fatsGoal ||
+            currentPlan.fats ||
+            0,
+        };
+
+        setProgram({
+          startDate:
+            planData.startDate ||
+            currentPlan.startDate ||
+            null,
+
+          endDate:
+            planData.endDate ||
+            currentPlan.endDate ||
+            null,
+
+          nutritionist: {
+            name:
+              nutritionist?.name ||
+              nutritionist?.fullName ||
+              "Your Nutritionist",
+
+            image:
+              nutritionist?.imageUrl ||
+              "https://randomuser.me/api/portraits/women/1.jpg",
+          },
+
+          weeklyPlan: weeklyPlan.map((day) => ({
+            day: day.dayName || day.day,
+
+            date: day.date,
+
+            meals: (day.meals || []).map((meal) => ({
+              name: meal.mealType || meal.name,
+
+              time: meal.mealTime,
+
+              foods:
+                meal.foods ||
+                meal.description ||
+                "No foods listed",
+
+              calories: meal.calories || 0,
+
+              completed: meal.completed || false,
+            })),
+
+            waterIntake: day.waterIntake || 0,
+
+            waterGoal: day.waterGoal || 8,
+
+            exercises: day.exercises || [],
+          })),
+
+          dailyGoal,
+        });
+
+        setLoading(false);
+      } catch (err) {
+        console.error("Error fetching program:", err);
+
+        setError(
+          err?.response?.data?.message ||
+            err.message ||
+            "Failed to load program data"
+        );
+
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Toggle meal completion safely
+  const handleToggleMealComplete = (dayIndex, mealIndex) => {
+    setProgram((prev) => ({
+      ...prev,
+
+      weeklyPlan: prev.weeklyPlan.map((day, dIdx) =>
+        dIdx === dayIndex
+          ? {
+              ...day,
+
+              meals: day.meals.map((meal, mIdx) =>
+                mIdx === mealIndex
+                  ? {
+                      ...meal,
+                      completed: !meal.completed,
+                    }
+                  : meal
+              ),
+            }
+          : day
+      ),
+    }));
   };
 
-  const handleAccordionChange = (day) => (event, isExpanded) => {
-    setExpandedDay(isExpanded ? day : null);
-  };
+  // Loading state
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          mt: 8,
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
+
+  // Empty state
+  if (!program || program.weeklyPlan.length === 0) {
+    return (
+      <Box
+        sx={{
+          minHeight: "70vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          flexDirection: "column",
+          textAlign: "center",
+          p: 3,
+        }}
+      >
+        <img
+          src="https://cdn-icons-png.flaticon.com/512/4076/4076478.png"
+          alt="No Plan"
+          width={180}
+        />
+
+        <Typography variant="h5" fontWeight="bold" mt={3}>
+          No Active Meal Plan Yet
+        </Typography>
+
+        <Typography
+          variant="body1"
+          color="text.secondary"
+          mt={1}
+        >
+          Your nutritionist has not assigned a nutrition
+          program yet.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box
       sx={{
         bgcolor: "background.default",
-        color: "text.primary",
         minHeight: "100vh",
+        p: 3,
       }}
     >
+      {/* Header */}
       <Paper
         sx={{
           p: 3,
@@ -90,7 +330,6 @@ function MyProgram() {
           borderRadius: 3,
           bgcolor: "primary.main",
           color: "#fff",
-          backgroundImage: "none",
         }}
       >
         <Box
@@ -104,17 +343,24 @@ function MyProgram() {
         >
           <Box>
             <Typography variant="h5" fontWeight="bold">
-              برنامجي الغذائي
+              My Nutrition Program
             </Typography>
 
-            <Typography variant="body2" sx={{ mt: 1, opacity: 0.9 }}>
-              من {program.startDate} إلى {program.endDate}
+            <Typography
+              variant="body2"
+              sx={{ mt: 1, opacity: 0.9 }}
+            >
+              {program.startDate && program.endDate
+                ? `${program.startDate} — ${program.endDate}`
+                : "No active period"}
             </Typography>
           </Box>
 
           <Chip
-            avatar={<Avatar src={program.nutritionist.image} />}
-            label={`مع: ${program.nutritionist.name}`}
+            avatar={
+              <Avatar src={program.nutritionist.image} />
+            }
+            label={`With: ${program.nutritionist.name}`}
             sx={{
               bgcolor: "#fff",
               color: "primary.main",
@@ -124,187 +370,318 @@ function MyProgram() {
         </Box>
       </Paper>
 
+      {/* Daily Goals */}
       <Paper
         sx={{
           p: 3,
           mb: 3,
           borderRadius: 3,
-          bgcolor: "background.paper",
-          color: "text.primary",
-          backgroundImage: "none",
         }}
       >
-        <Typography variant="h6" fontWeight="bold" mb={2}>
-          الهدف اليومي
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          mb={2}
+        >
+          Daily Goals
         </Typography>
 
         <Grid container spacing={2}>
-          {[
-            { value: program.dailyGoal.calories, label: "سعرة حرارية" },
-            { value: `${program.dailyGoal.protein}g`, label: "بروتين" },
-            { value: `${program.dailyGoal.carbs}g`, label: "كربوهيدرات" },
-            { value: `${program.dailyGoal.fats}g`, label: "دهون" },
-          ].map((item, index) => (
-            <Grid key={index} item xs={6} sm={3}>
-              <Card
-                variant="outlined"
-                sx={{
-                  textAlign: "center",
-                  p: 1,
-                  bgcolor: "background.default",
-                  color: "text.primary",
-                  borderColor: "divider",
-                }}
+          <Grid item xs={6} sm={3}>
+            <Card
+              variant="outlined"
+              sx={{
+                textAlign: "center",
+                p: 1,
+              }}
+            >
+              <Typography
+                variant="h4"
+                color="primary.main"
               >
-                <Typography variant="h4" color="primary.main">
-                  {item.value}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {item.label}
-                </Typography>
-              </Card>
-            </Grid>
-          ))}
+                {program.dailyGoal.calories}
+              </Typography>
+
+              <Typography variant="body2">
+                Calories
+              </Typography>
+            </Card>
+          </Grid>
+
+          <Grid item xs={6} sm={3}>
+            <Card
+              variant="outlined"
+              sx={{
+                textAlign: "center",
+                p: 1,
+              }}
+            >
+              <Typography
+                variant="h4"
+                color="primary.main"
+              >
+                {program.dailyGoal.protein}g
+              </Typography>
+
+              <Typography variant="body2">
+                Protein
+              </Typography>
+            </Card>
+          </Grid>
+
+          <Grid item xs={6} sm={3}>
+            <Card
+              variant="outlined"
+              sx={{
+                textAlign: "center",
+                p: 1,
+              }}
+            >
+              <Typography
+                variant="h4"
+                color="primary.main"
+              >
+                {program.dailyGoal.carbs}g
+              </Typography>
+
+              <Typography variant="body2">
+                Carbs
+              </Typography>
+            </Card>
+          </Grid>
+
+          <Grid item xs={6} sm={3}>
+            <Card
+              variant="outlined"
+              sx={{
+                textAlign: "center",
+                p: 1,
+              }}
+            >
+              <Typography
+                variant="h4"
+                color="primary.main"
+              >
+                {program.dailyGoal.fats}g
+              </Typography>
+
+              <Typography variant="body2">
+                Fats
+              </Typography>
+            </Card>
+          </Grid>
         </Grid>
       </Paper>
 
-      <Typography variant="h6" fontWeight="bold" mb={2}>
-        خطة الأسبوع
+      {/* Weekly Plan */}
+      <Typography
+        variant="h6"
+        fontWeight="bold"
+        mb={2}
+      >
+        Weekly Plan
       </Typography>
 
-      {program.weeklyPlan.map((day, index) => (
-        <Accordion
-          key={index}
-          expanded={expandedDay === day.day}
-          onChange={handleAccordionChange(day.day)}
+      {program.weeklyPlan.map((day, dayIdx) => (
+        <Paper
+          key={dayIdx}
           sx={{
-            mb: 2,
+            mb: 3,
             borderRadius: 2,
-            bgcolor: "background.paper",
-            color: "text.primary",
-            backgroundImage: "none",
-            border: "1px solid",
-            borderColor: "divider",
-            "&:before": { display: "none" },
+            overflow: "hidden",
           }}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, width: "100%" }}>
-              <Avatar sx={{ bgcolor: "primary.main", color: "#fff" }}>
-                <TodayIcon />
-              </Avatar>
+          {/* Day Header */}
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: "primary.light",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <Avatar
+              sx={{
+                bgcolor: "#fff",
+                color: "primary.main",
+              }}
+            >
+              <TodayIcon />
+            </Avatar>
 
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle1" fontWeight="bold">
-                  {day.day}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {day.date}
-                </Typography>
-              </Box>
-
-              <Chip
-                size="small"
-                label={`ماء: ${day.waterIntake}/${day.waterGoal}`}
-                icon={<WaterIcon />}
-                color={day.waterIntake >= day.waterGoal ? "success" : "default"}
-              />
-            </Box>
-          </AccordionSummary>
-
-          <AccordionDetails>
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
-                <Typography variant="body2">شرب الماء</Typography>
-                <Typography variant="body2" fontWeight="bold">
-                  {day.waterIntake} / {day.waterGoal} كأس
-                </Typography>
-              </Box>
-
-              <LinearProgress
-                variant="determinate"
-                value={(day.waterIntake / day.waterGoal) * 100}
-                sx={{ height: 10, borderRadius: 5 }}
-              />
-            </Box>
-
-            <Typography variant="subtitle2" fontWeight="bold" mb={2}>
-              الوجبات
+            <Typography
+              variant="h6"
+              sx={{ flex: 1 }}
+            >
+              {day.day}{" "}
+              {day.date && `(${day.date})`}
             </Typography>
 
-            {day.meals.map((meal, mealIndex) => (
-              <Card
-                key={mealIndex}
-                variant="outlined"
+            <Chip
+              size="small"
+              label={`Water: ${day.waterIntake}/${day.waterGoal}`}
+              icon={<WaterIcon />}
+              color={
+                day.waterIntake >= day.waterGoal
+                  ? "success"
+                  : "default"
+              }
+              sx={{ bgcolor: "#fff" }}
+            />
+          </Box>
+
+          {/* Water Progress */}
+          <Box
+            sx={{
+              p: 2,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                mb: 1,
+              }}
+            >
+              <Typography variant="body2">
+                Water Intake
+              </Typography>
+
+              <Typography
+                variant="body2"
+                fontWeight="bold"
+              >
+                {day.waterIntake} / {day.waterGoal} cups
+              </Typography>
+            </Box>
+
+            <LinearProgress
+              variant="determinate"
+              value={
+                day.waterGoal
+                  ? (day.waterIntake /
+                      day.waterGoal) *
+                    100
+                  : 0
+              }
+              sx={{
+                height: 8,
+                borderRadius: 4,
+              }}
+            />
+          </Box>
+
+          {/* Meals Table */}
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell width="5%">
+                    Status
+                  </TableCell>
+
+                  <TableCell width="20%">
+                    Meal
+                  </TableCell>
+
+                  <TableCell width="15%">
+                    Time
+                  </TableCell>
+
+                  <TableCell width="40%">
+                    Foods
+                  </TableCell>
+
+                  <TableCell width="10%">
+                    Calories
+                  </TableCell>
+                </TableRow>
+              </TableHead>
+
+              <TableBody>
+                {(day.meals || []).map(
+                  (meal, mealIdx) => (
+                    <TableRow key={mealIdx}>
+                      <TableCell>
+                        <IconButton
+                          onClick={() =>
+                            handleToggleMealComplete(
+                              dayIdx,
+                              mealIdx
+                            )
+                          }
+                        >
+                          {meal.completed ? (
+                            <CheckCircleIcon color="success" />
+                          ) : (
+                            <UncheckedIcon />
+                          )}
+                        </IconButton>
+                      </TableCell>
+
+                      <TableCell>
+                        {meal.name}
+                      </TableCell>
+
+                      <TableCell>
+                        {meal.time}
+                      </TableCell>
+
+                      <TableCell>
+                        {meal.foods}
+                      </TableCell>
+
+                      <TableCell>
+                        {meal.calories}
+                      </TableCell>
+                    </TableRow>
+                  )
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {/* Exercises */}
+          {day.exercises &&
+            day.exercises.length > 0 && (
+              <Box
                 sx={{
-                  mb: 2,
-                  bgcolor: "background.default",
-                  color: "text.primary",
+                  p: 2,
+                  borderTop: "1px solid",
                   borderColor: "divider",
                 }}
               >
-                <CardContent>
-                  <Box
-                    sx={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 1,
-                    }}
-                  >
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <IconButton size="small" color={meal.completed ? "success" : "default"}>
-                        {meal.completed ? <CheckCircleIcon /> : <UncheckedIcon />}
-                      </IconButton>
-
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          {meal.name}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {meal.time}
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Chip label={`${meal.calories} سعرة`} size="small" />
-                  </Box>
-
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mr: 4 }}>
-                    {meal.foods}
-                  </Typography>
-                </CardContent>
-              </Card>
-            ))}
-
-            {day.exercises.length > 0 && (
-              <>
-                <Typography variant="subtitle2" fontWeight="bold" mb={2} mt={2}>
-                  التمارين
+                <Typography
+                  variant="subtitle2"
+                  fontWeight="bold"
+                  mb={1}
+                >
+                  Exercises
                 </Typography>
 
-                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                  {day.exercises.map((exercise, exIndex) => (
+                <Box
+                  sx={{
+                    display: "flex",
+                    gap: 1,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {day.exercises.map((ex, idx) => (
                     <Chip
-                      key={exIndex}
-                      icon={<ExerciseIcon />}
-                      label={exercise}
+                      key={idx}
+                      label={ex}
                       variant="outlined"
-                      sx={{
-                        borderColor: "divider",
-                        color: "text.primary",
-                      }}
                     />
                   ))}
                 </Box>
-              </>
+              </Box>
             )}
-          </AccordionDetails>
-        </Accordion>
+        </Paper>
       ))}
     </Box>
   );
 }
-
-export default MyProgram;

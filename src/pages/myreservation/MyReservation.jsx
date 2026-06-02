@@ -1,15 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Paper,
   Typography,
   Grid,
   Card,
-  CardContent,
   Chip,
   Button,
-  Avatar,
-  Divider,
   Tabs,
   Tab,
   Dialog,
@@ -18,375 +15,486 @@ import {
   DialogActions,
   TextField,
   Rating,
+  Alert,
+  Snackbar,
+  CircularProgress,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
 } from "@mui/material";
-import {
-  Videocam as VideoIcon,
-  DateRange as DateIcon,
-  AccessTime as TimeIcon,
-  Cancel as CancelIcon,
-  Chat as ChatIcon,
-  Star as StarIcon,
-} from "@mui/icons-material";
+import { BookmarkAdd as BookIcon } from "@mui/icons-material";
+import axios from "axios";
+
+const API = "https://nutrilife.runasp.net/api/Appointment";
 
 function MyReservation() {
   const [tabValue, setTabValue] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const [upcoming, setUpcoming] = useState([]);
+  const [past, setPast] = useState([]);
+  const [availableSlots, setAvailableSlots] = useState([]);
+
+  const [subscriptionId, setSubscriptionId] = useState(null);
+  const [clientId, setClientId] = useState(null);
+
   const [openCancelDialog, setOpenCancelDialog] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
+
   const [openReviewDialog, setOpenReviewDialog] = useState(false);
   const [rating, setRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
 
-  const [appointments, setAppointments] = useState({
-    upcoming: [
-      {
-        id: 1,
-        specialistName: "د. أحمد محمد",
-        specialistImage: "https://randomuser.me/api/portraits/men/1.jpg",
-        specialty: "أخصائي تغذية",
-        date: "2026-01-25",
-        time: "4:00 م",
-        duration: 30,
-        type: "online",
-        status: "confirmed",
-        meetingLink: "https://zoom.us/meeting/123",
-      },
-      {
-        id: 2,
-        specialistName: "د. سارة علي",
-        specialistImage: "https://randomuser.me/api/portraits/women/2.jpg",
-        specialty: "أخصائية تغذية رياضية",
-        date: "2026-01-28",
-        time: "11:00 ص",
-        duration: 45,
-        type: "online",
-        status: "pending",
-        meetingLink: null,
-      },
-    ],
-    past: [
-      {
-        id: 3,
-        specialistName: "د. أحمد محمد",
-        specialistImage: "https://randomuser.me/api/portraits/men/1.jpg",
-        specialty: "أخصائي تغذية",
-        date: "2026-01-10",
-        time: "3:00 م",
-        duration: 30,
-        type: "online",
-        status: "completed",
-        hasReview: true,
-      },
-      {
-        id: 4,
-        specialistName: "د. سارة علي",
-        specialistImage: "https://randomuser.me/api/portraits/women/2.jpg",
-        specialty: "أخصائية تغذية رياضية",
-        date: "2026-01-05",
-        time: "10:00 ص",
-        duration: 30,
-        type: "online",
-        status: "completed",
-        hasReview: false,
-      },
-    ],
+  const [openBookDialog, setOpenBookDialog] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [appointmentType, setAppointmentType] = useState("inclinic");
+
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "success",
   });
 
-  const handleCancelClick = (appointment) => {
-    setSelectedAppointment(appointment);
-    setOpenCancelDialog(true);
+  const token = localStorage.getItem("token");
+
+  const showMessage = (message, severity = "success") => {
+    setSnackbar({ open: true, message, severity });
   };
 
-  const confirmCancel = () => {
-    setAppointments((prev) => ({
-      ...prev,
-      upcoming: prev.upcoming.filter((a) => a.id !== selectedAppointment.id),
-    }));
+  const getErrorMessage = (err) => {
+    const data = err.response?.data;
+    if (typeof data === "string") return data;
+    if (data?.message) return data.message;
+    if (data?.title) return data.title;
+    return err.message || "حدث خطأ غير معروف";
+  };
+
+  const getClientIdFromToken = () => {
+    if (!token) return null;
+
+    try {
+      const base64Url = token.split(".")[1];
+      const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = JSON.parse(atob(base64));
+
+      return (
+        decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"] ||
+        decoded["nameid"] ||
+        decoded["sub"] ||
+        decoded["id"] ||
+        decoded["userId"] ||
+        decoded["UserId"] ||
+        null
+      );
+    } catch (err) {
+      console.error("Error decoding token:", err);
+      return null;
+    }
+  };
+
+  const fetchSubscriptionId = async (cId) => {
+    if (!cId) return null;
+
+    try {
+      const res = await axios.get(
+        `https://nutrilife.runasp.net/api/Subscription/clientHistory/${cId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      
+      console.log("Subscriptions:", res.data);
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      console.log("Subscriptions:", list);
+
+      const activeSub =
+        list.find((s) =>
+          ["active", "approved"].includes((s.status || "").toLowerCase())
+        ) || list[0];
+
+      if (activeSub?.id) {
+        setSubscriptionId(activeSub.id);
+        return activeSub.id;
+      }
+
+      showMessage("لا يوجد اشتراك فعال لهذا المراجع", "warning");
+      return null;
+    } catch (err) {
+      console.error(
+        "Subscription error:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+      showMessage(`فشل جلب الاشتراك: ${getErrorMessage(err)}`, "error");
+      return null;
+    }
+  };
+
+  const fetchAvailableSlots = async (subId) => {
+    if (!subId) {
+      setAvailableSlots([]);
+      return [];
+    }
+
+    try {
+      const res = await axios.get(`${API}/AvailableAppointments/${subId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = Array.isArray(res.data) ? res.data : [];
+      console.log("Available slots:", data);
+
+      setAvailableSlots(data);
+      return data;
+    } catch (err) {
+      console.error(
+        "Available appointments error:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+      showMessage(`فشل جلب المواعيد المتاحة: ${getErrorMessage(err)}`, "error");
+      setAvailableSlots([]);
+      return [];
+    }
+  };
+
+  const fetchMyAppointments = async () => {
+    try {
+      const res = await axios.get(`${API}/ClientAppointment`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = Array.isArray(res.data) ? res.data : [];
+      console.log("Client appointments:", data);
+
+      const now = new Date();
+      const upcomingApps = [];
+      const pastApps = [];
+
+      data.forEach((app) => {
+        const status = (app.status || "").toLowerCase();
+        const dateText = `${app.date || ""} ${app.time || app.Time || ""}`;
+        const appDate = new Date(dateText);
+
+        if (status === "completed" || appDate < now) {
+          pastApps.push(app);
+        } else {
+          upcomingApps.push(app);
+        }
+      });
+
+      setUpcoming(upcomingApps);
+      setPast(pastApps);
+    } catch (err) {
+      console.error(
+        "Client appointments error:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+      setUpcoming([]);
+      setPast([]);
+    }
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+
+      const cId = getClientIdFromToken();
+      setClientId(cId);
+
+      if (!cId) {
+        showMessage("لم يتم العثور على رقم المراجع من التوكن", "error");
+        setLoading(false);
+        return;
+      }
+
+      const subId = await fetchSubscriptionId(cId);
+
+      if (subId) {
+        await fetchAvailableSlots(subId);
+      }
+
+      await fetchMyAppointments();
+      setLoading(false);
+    };
+
+    init();
+  }, []);
+
+  const handleBookAppointment = async () => {
+    if (!selectedSlot || !subscriptionId) {
+      showMessage("اختاري موعد أولاً", "warning");
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${API}/ReserveAppointment`,
+        {
+          Id: selectedSlot.id,
+          SubscriptionId: subscriptionId,
+          type: appointmentType,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      showMessage("تم حجز الموعد بنجاح", "success");
+      setOpenBookDialog(false);
+      setSelectedSlot(null);
+
+      await fetchAvailableSlots(subscriptionId);
+      await fetchMyAppointments();
+    } catch (err) {
+      console.error(
+        "Reserve appointment error:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+      showMessage(`فشل الحجز: ${getErrorMessage(err)}`, "error");
+    }
+  };
+
+  const handleJoinMeeting = (meetingLink) => {
+    if (meetingLink) {
+      window.open(meetingLink, "_blank");
+    } else {
+      showMessage("رابط اللقاء غير متوفر بعد", "warning");
+    }
+  };
+
+  const handleCancelAppointment = async () => {
+    showMessage("إلغاء الموعد غير مربوط حالياً", "warning");
     setOpenCancelDialog(false);
-    setSelectedAppointment(null);
   };
 
-  const handleReviewClick = (appointment) => {
-    setSelectedAppointment(appointment);
-    setOpenReviewDialog(true);
-  };
-
-  const submitReview = () => {
-    setAppointments((prev) => ({
-      ...prev,
-      past: prev.past.map((a) =>
-        a.id === selectedAppointment.id ? { ...a, hasReview: true } : a
-      ),
-    }));
+  const submitReview = async () => {
+    showMessage("تم إرسال التقييم بنجاح", "success");
     setOpenReviewDialog(false);
     setRating(0);
+    setReviewComment("");
   };
 
-  const handleJoinMeeting = (link) => {
-    window.open(link, "_blank");
-  };
-
-  const AppointmentCard = ({ appointment, isPast = false }) => (
-    <Card
-      sx={{
-        mb: 2,
-        borderRadius: 2,
-        bgcolor: "background.paper",
-        color: "text.primary",
-        border: "1px solid",
-        borderColor: "divider",
-        backgroundImage: "none",
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-          <Avatar
-            src={appointment.specialistImage}
-            sx={{ width: 60, height: 60 }}
-          />
-
-          <Box sx={{ flex: 1 }}>
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-                gap: 1,
-              }}
-            >
-              <Box>
-                <Typography variant="h6" fontWeight="bold">
-                  {appointment.specialistName}
-                </Typography>
-
-                <Typography variant="caption" color="text.secondary">
-                  {appointment.specialty}
-                </Typography>
-              </Box>
-
-              <Chip
-                label={
-                  appointment.status === "confirmed"
-                    ? "مؤكد"
-                    : appointment.status === "pending"
-                    ? "قيد المراجعة"
-                    : "مكتمل"
-                }
-                color={
-                  appointment.status === "confirmed"
-                    ? "success"
-                    : appointment.status === "pending"
-                    ? "warning"
-                    : "default"
-                }
-                size="small"
-              />
-            </Box>
-
-            <Divider sx={{ my: 1.5 }} />
-
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <DateIcon color="action" fontSize="small" />
-                  <Typography variant="body2">{appointment.date}</Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <TimeIcon color="action" fontSize="small" />
-                  <Typography variant="body2">
-                    {appointment.time} ({appointment.duration} دقيقة)
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-
-            <Box sx={{ display: "flex", gap: 2, mt: 2, flexWrap: "wrap" }}>
-              {!isPast &&
-                appointment.status === "confirmed" &&
-                appointment.meetingLink && (
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<VideoIcon />}
-                    onClick={() => handleJoinMeeting(appointment.meetingLink)}
-                  >
-                    انضم للجلسة
-                  </Button>
-                )}
-
-              {!isPast && (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  color="error"
-                  startIcon={<CancelIcon />}
-                  onClick={() => handleCancelClick(appointment)}
-                >
-                  إلغاء
-                </Button>
-              )}
-
-              {isPast && !appointment.hasReview && (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<StarIcon />}
-                  onClick={() => handleReviewClick(appointment)}
-                >
-                  تقييم الأخصائي
-                </Button>
-              )}
-
-              <Button variant="text" size="small" startIcon={<ChatIcon />}>
-                مراسلة
-              </Button>
-            </Box>
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  if (loading) {
+    return (
+      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
-    <Box
-      sx={{
-        bgcolor: "background.default",
-        color: "text.primary",
-        minHeight: "100vh",
-      }}
-    >
-      <Paper
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 3,
-          bgcolor: "primary.main",
-          color: "#fff",
-          backgroundImage: "none",
-        }}
-      >
+    <Box sx={{ bgcolor: "background.default", minHeight: "100vh", p: 3 }}>
+      <Paper sx={{ p: 3, mb: 3, borderRadius: 3, bgcolor: "primary.main", color: "#fff" }}>
         <Typography variant="h5" fontWeight="bold">
           My Reservation
         </Typography>
-
         <Typography variant="body2" sx={{ mt: 1, opacity: 0.9 }}>
-          إدارة مواعيدك مع الأخصائيين
+          إدارة مواعيدك مع الأخصائي
         </Typography>
       </Paper>
 
-      <Paper
-        sx={{
-          borderRadius: 3,
-          overflow: "hidden",
-          bgcolor: "background.paper",
-          color: "text.primary",
-          border: "1px solid",
-          borderColor: "divider",
-          backgroundImage: "none",
-        }}
-      >
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 2, bgcolor: "#fff3e0" }}>
+        <Typography variant="body2">Client ID: {clientId || "غير موجود"}</Typography>
+        <Typography variant="body2">Subscription ID: {subscriptionId || "غير موجود"}</Typography>
+        <Typography variant="body2">Available Slots: {availableSlots.length}</Typography>
+      </Paper>
+
+      {availableSlots.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
+          <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, color: "#2e7d32" }}>
+            Available Appointments
+          </Typography>
+
+          <Grid container spacing={2}>
+            {availableSlots.map((slot) => (
+              <Grid item xs={12} sm={6} md={4} key={slot.id}>
+                <Card sx={{ p: 2, borderLeft: "4px solid #2e7d32" }}>
+                  <Typography fontWeight="bold">{slot.date}</Typography>
+
+                  <Typography variant="body2" color="text.secondary">
+                    {slot.time || slot.Time}
+                  </Typography>
+
+                  {slot.notes && (
+                    <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                      {slot.notes}
+                    </Typography>
+                  )}
+
+                  <Button
+                    variant="contained"
+                    color="success"
+                    fullWidth
+                    startIcon={<BookIcon />}
+                    sx={{ mt: 2 }}
+                    onClick={() => {
+                      setSelectedSlot(slot);
+                      setAppointmentType("inclinic");
+                      setOpenBookDialog(true);
+                    }}
+                  >
+                    Book Appointment
+                  </Button>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </Paper>
+      )}
+
+      <Paper sx={{ borderRadius: 3, overflow: "hidden" }}>
         <Tabs
           value={tabValue}
           onChange={(e, v) => setTabValue(v)}
-          sx={{
-            borderBottom: 1,
-            borderColor: "divider",
-            px: 2,
-            "& .MuiTab-root": {
-              color: "text.secondary",
-            },
-            "& .Mui-selected": {
-              color: "primary.main",
-            },
-          }}
+          sx={{ borderBottom: 1, borderColor: "divider", px: 2 }}
         >
-          <Tab label={`القادمة (${appointments.upcoming.length})`} />
-          <Tab label={`السابقة (${appointments.past.length})`} />
+          <Tab label={`القادمة (${upcoming.length})`} />
+          <Tab label={`السابقة (${past.length})`} />
         </Tabs>
 
         <Box sx={{ p: 3 }}>
           {tabValue === 0 &&
-            (appointments.upcoming.length > 0 ? (
-              appointments.upcoming.map((app) => (
-                <AppointmentCard
-                  key={app.id}
-                  appointment={app}
-                  isPast={false}
-                />
+            (upcoming.length > 0 ? (
+              upcoming.map((app) => (
+                <Card key={app.id} sx={{ mb: 2, p: 2 }}>
+                  <Typography variant="h6">
+                    {app.specialistName || app.nutritionistName || "أخصائي تغذية"}
+                  </Typography>
+
+                  <Typography>{app.date}</Typography>
+                  <Typography>{app.time || app.Time}</Typography>
+
+                  <Chip
+                    label={app.status || "Pending"}
+                    color={(app.status || "").toLowerCase() === "confirmed" ? "success" : "warning"}
+                    size="small"
+                    sx={{ mt: 1 }}
+                  />
+
+                  <Box sx={{ mt: 2, display: "flex", gap: 1 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={() => handleJoinMeeting(app.meetingLink)}
+                    >
+                      Join
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      onClick={() => {
+                        setSelectedAppointment(app);
+                        setOpenCancelDialog(true);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </Box>
+                </Card>
               ))
             ) : (
               <Box sx={{ textAlign: "center", py: 5 }}>
-                <Typography color="text.secondary">
-                  لا توجد حجوزات قادمة
-                </Typography>
-
-                <Button variant="contained" sx={{ mt: 2 }}>
-                  حجز موعد جديد
-                </Button>
+                <Typography color="text.secondary">لا توجد حجوزات قادمة</Typography>
               </Box>
             ))}
 
           {tabValue === 1 &&
-            (appointments.past.length > 0 ? (
-              appointments.past.map((app) => (
-                <AppointmentCard key={app.id} appointment={app} isPast />
+            (past.length > 0 ? (
+              past.map((app) => (
+                <Card key={app.id} sx={{ mb: 2, p: 2 }}>
+                  <Typography variant="h6">
+                    {app.specialistName || app.nutritionistName || "أخصائي تغذية"}
+                  </Typography>
+
+                  <Typography>{app.date}</Typography>
+                  <Typography>{app.time || app.Time}</Typography>
+
+                  <Chip label={app.status || "Completed"} size="small" sx={{ mt: 1 }} />
+
+                  <Button
+                    sx={{ mt: 2 }}
+                    variant="outlined"
+                    onClick={() => {
+                      setSelectedAppointment(app);
+                      setOpenReviewDialog(true);
+                    }}
+                  >
+                    تقييم
+                  </Button>
+                </Card>
               ))
             ) : (
               <Box sx={{ textAlign: "center", py: 5 }}>
-                <Typography color="text.secondary">
-                  لا توجد حجوزات سابقة
-                </Typography>
+                <Typography color="text.secondary">لا توجد حجوزات سابقة</Typography>
               </Box>
             ))}
         </Box>
       </Paper>
 
-      <Dialog
-  open={openCancelDialog}
-  onClose={() => setOpenCancelDialog(false)}
-  PaperProps={{
-    sx: {
-      bgcolor: "background.paper",
-      color: "text.primary",
-      backgroundImage: "none",
-    },
-  }}
->
-        <DialogTitle>إلغاء الحجز</DialogTitle>
+      <Dialog open={openBookDialog} onClose={() => setOpenBookDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>حجز موعد جديد</DialogTitle>
 
         <DialogContent>
-          <Typography>هل أنت متأكد من إلغاء هذا الحجز؟</Typography>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              {selectedSlot?.date} | {selectedSlot?.time || selectedSlot?.Time}
+            </Typography>
+
+            <FormControl fullWidth>
+              <InputLabel>نوع الموعد</InputLabel>
+              <Select
+                value={appointmentType}
+                label="نوع الموعد"
+                onChange={(e) => setAppointmentType(e.target.value)}
+              >
+                <MenuItem value="inclinic">وجاهي</MenuItem>
+                <MenuItem value="online">إلكتروني</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
         </DialogContent>
 
         <DialogActions>
+          <Button onClick={() => setOpenBookDialog(false)}>إلغاء</Button>
+          <Button variant="contained" onClick={handleBookAppointment}>
+            تأكيد الحجز
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={openCancelDialog} onClose={() => setOpenCancelDialog(false)}>
+        <DialogTitle>إلغاء الحجز</DialogTitle>
+        <DialogContent>
+          <Typography>هل أنت متأكد من إلغاء هذا الحجز؟</Typography>
+        </DialogContent>
+        <DialogActions>
           <Button onClick={() => setOpenCancelDialog(false)}>تراجع</Button>
-          <Button onClick={confirmCancel} color="error" variant="contained">
+          <Button onClick={handleCancelAppointment} color="error" variant="contained">
             إلغاء الحجز
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog
-  open={openReviewDialog}
-  onClose={() => setOpenReviewDialog(false)}
-  maxWidth="sm"
-  fullWidth
-  PaperProps={{
-    sx: {
-      bgcolor: "background.paper",
-      color: "text.primary",
-      backgroundImage: "none",
-    },
-  }}
->
+      <Dialog open={openReviewDialog} onClose={() => setOpenReviewDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>تقييم الأخصائي</DialogTitle>
 
         <DialogContent>
           <Box sx={{ textAlign: "center", py: 2 }}>
             <Typography variant="h6" gutterBottom>
-              {selectedAppointment?.specialistName}
+              {selectedAppointment?.specialistName || "الأخصائي"}
             </Typography>
 
             <Rating
@@ -401,7 +509,8 @@ function MyReservation() {
               multiline
               rows={3}
               placeholder="اكتب تعليقك عن الجلسة..."
-              variant="outlined"
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
             />
           </Box>
         </DialogContent>
@@ -413,6 +522,17 @@ function MyReservation() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity={snackbar.severity} sx={{ width: "100%" }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

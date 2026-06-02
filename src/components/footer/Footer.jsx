@@ -49,9 +49,6 @@ function Footer() {
               <Link component={RouterLink} to="/register" color="inherit" underline="none">
                 Personalized Plan
               </Link>
-              <Link component={RouterLink} to="/specialists" color="inherit" underline="none">
-                Specialists
-              </Link>
               <Link
                 component="button"
                 onClick={handleScrollToHowItWorks}

@@ -43,9 +43,10 @@ import { ThemeModeContext } from "../../App";
 
 const BASE_URL = "https://nutrilife.runasp.net/api/Account";
 
-export default function Settings() {
+export default function SpecialistSettings() {
   const navigate = useNavigate();
   const { darkMode, onThemeToggle } = useContext(ThemeModeContext);
+
   // ─── User state ─────────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   const [form, setForm] = useState({ userName: "", email: "" });
@@ -83,14 +84,14 @@ export default function Settings() {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // ✅ API Functions - كلها محدثة وشغالة
+  // ✅ API Functions
   // ═══════════════════════════════════════════════════════════════════════════════
-  
+
   // GET - Fetch profile image
   const getProfileImage = async () => {
     const token = localStorage.getItem("token");
     if (!token) return null;
-    
+
     try {
       const response = await axios.get(`${BASE_URL}/myprofileimg`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -108,10 +109,10 @@ export default function Settings() {
   const addProfileImage = async (file) => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
-    
+
     const formData = new FormData();
     formData.append("file", file);
-    
+
     const response = await axios.post(`${BASE_URL}/addprofileimg`, formData, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -122,32 +123,41 @@ export default function Settings() {
   const deleteProfileImage = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
-    
+
     const response = await axios.delete(`${BASE_URL}/deleteprofileimg`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
   };
 
-  // ✅ PUT - Update profile (username and email)
+  // ✅ PUT - Update specialist profile
   const updateProfileData = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
 
+    const userId = getUserIdFromToken();
+
     const response = await axios.put(
-      `${BASE_URL}/profile`,
+      `${BASE_URL}/editNutri/${userId}`,
       {
-        userName: form.userName,
-        email: form.email,
+        UserName: form.userName,
+        FullName: user.fullName || "",
+        PhoneNumber: user.phoneNumber || "",
+        Specialization: user.specialization || "",
+        Bio: user.bio || "",
+        ExperienceYears: user.experienceYears || 0,
       },
       {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       }
     );
+
     return response.data;
   };
 
-  // ✅ put - Change password API (corrected to match required endpoint)
+  // ✅ PUT - Change password
   const changePasswordAPI = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
@@ -156,7 +166,7 @@ export default function Settings() {
     const payload = {
       Email: user.email,
       OldPassword: passwords.current,
-      NewPassword: passwords.newPass
+      NewPassword: passwords.newPass,
     };
 
     const response = await axios.put(
@@ -183,41 +193,39 @@ export default function Settings() {
   };
 
   // ─── Load user from token ────────────────────────────────────────────────────
- // ─── Load user from token ────────────────────────────────────────────────────
-useEffect(() => {
-  const token = localStorage.getItem("token");
-  if (!token) return;
-  
-  const loadUser = async () => {
-    try {
-      const userId = getUserIdFromToken();
-      if (!userId) {
-        showSnack("Unable to verify user identity.", "error");
-        return;
-      }
-      // ✅ استخدم الرابط الصحيح لجلب بيانات المستخدم مباشرة
-      const response = await axios.get(`${BASE_URL}/GetClient/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const currentUser = response.data;
-      if (currentUser) {
-        setUser(currentUser);
-        setForm({ 
-          userName: currentUser.userName || "", 
-          email: currentUser.email || "" 
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const loadUser = async () => {
+      try {
+        const userId = getUserIdFromToken();
+        if (!userId) {
+          showSnack("Unable to verify user identity.", "error");
+          return;
+        }
+        // ✅ استخدام endpoint الخاص بالـ Specialist
+        const response = await axios.get(`${BASE_URL}/GetNutri/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
+        const currentUser = response.data;
+        if (currentUser) {
+          setUser(currentUser);
+          setForm({
+            userName: currentUser.userName || "",
+            email: currentUser.email || "",
+          });
+        }
+        await loadProfileImage();
+      } catch (err) {
+        console.error("Error loading user data:", err);
+        const errorMessage = err.response?.data?.message || "Failed to load user data.";
+        showSnack(errorMessage, "error");
       }
-      await loadProfileImage();
-    } catch (err) {
-      console.error("Error loading user data:", err);
-      // عرض رسالة خطأ أكثر تحديداً من الاستجابة
-      const errorMessage = err.response?.data?.message || "Failed to load user data.";
-      showSnack(errorMessage, "error");
-    }
-  };
-  
-  loadUser();
-}, []);
+    };
+
+    loadUser();
+  }, []);
 
   // ─── Avatar Change Handler ────────────────────────────────────
   const handleAvatarChange = async (e) => {
@@ -287,7 +295,7 @@ useEffect(() => {
     try {
       await updateProfileData();
       showSnack("تم حفظ البيانات بنجاح! ✓", "success");
-      setUser(prev => ({ ...prev, userName: form.userName, email: form.email }));
+      setUser((prev) => ({ ...prev, userName: form.userName, email: form.email }));
     } catch (error) {
       console.error("Save error:", error);
       showSnack(error.response?.data?.message || "فشل حفظ البيانات. حاول مرة أخرى.", "error");
@@ -296,7 +304,7 @@ useEffect(() => {
     }
   };
 
-  // ─── Change password - updated for correct API ──────────────────────────────
+  // ─── Change password ──────────────────────────────────────────────────────────
   const handleChangePassword = async () => {
     if (!passwords.current || !passwords.newPass || !passwords.confirm) {
       showSnack("الرجاء ملء جميع حقول كلمة المرور", "warning");
@@ -356,31 +364,30 @@ useEffect(() => {
       }
 
       const API_URL = "https://nutrilife.runasp.net/api/Account";
-      
+
       await axios({
-        method: 'delete',
+        method: "delete",
         url: `${API_URL}/deleteAccount`,
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
         },
         data: {
           id: userId,
           password: deletePassword,
-          currentPassword: deletePassword
-        }
+          currentPassword: deletePassword,
+        },
       });
 
       localStorage.removeItem("token");
       showSnack("Account deleted successfully!", "success");
-      
+
       setTimeout(() => {
         navigate("/login");
       }, 2000);
-      
     } catch (err) {
       console.error("Delete account error:", err);
-      
+
       if (err.response) {
         if (err.response.status === 401) {
           showSnack("Session expired. Please login again.", "error");
@@ -397,14 +404,18 @@ useEffect(() => {
     }
   };
 
-  // ─── Section header - بالأخضر ─────────────────────────────────
+  // ─── Section header ───────────────────────────────────────────
   const SectionHeader = ({ icon, title, subtitle }) => (
     <Box display="flex" alignItems="center" gap={1.5} mb={3}>
       <Box
         sx={{
-          width: 40, height: 40, borderRadius: 2,
+          width: 40,
+          height: 40,
+          borderRadius: 2,
           bgcolor: "#2e7d32",
-          display: "flex", alignItems: "center", justifyContent: "center",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           color: "#fff",
         }}
       >
@@ -435,6 +446,7 @@ useEffect(() => {
     color: "#2e7d32",
     "&:hover": { borderColor: "#1b5e20", bgcolor: "rgba(46, 125, 50, 0.04)" },
   };
+
   const cardSx = {
     borderRadius: 3,
     mb: 3,
@@ -466,18 +478,18 @@ useEffect(() => {
           <SectionHeader
             icon={<Person fontSize="small" />}
             title="Profile Information"
-            subtitle="Update your name, email and profile picture"
+            subtitle="Update your specialist profile information"
           />
 
           <Box display="flex" alignItems="center" gap={3} mb={3} flexWrap="wrap">
             <Box position="relative">
-              <Avatar 
-                src={avatarPreview || currentImageUrl} 
+              <Avatar
+                src={avatarPreview || currentImageUrl}
                 sx={{ width: 80, height: 80, fontSize: 32 }}
               >
-                {(!avatarPreview && !currentImageUrl) && (form.userName?.[0]?.toUpperCase() || "U")}
+                {!avatarPreview && !currentImageUrl && (form.userName?.[0]?.toUpperCase() || "S")}
               </Avatar>
-              
+
               <Box
                 sx={{
                   position: "absolute",
@@ -498,16 +510,16 @@ useEffect(() => {
                 }}
               >
                 <label htmlFor="avatar-upload" style={{ cursor: "pointer" }}>
-                  <input 
-                    accept="image/*" 
-                    id="avatar-upload" 
-                    type="file" 
-                    hidden 
+                  <input
+                    accept="image/*"
+                    id="avatar-upload"
+                    type="file"
+                    hidden
                     onChange={handleAvatarChange}
                     disabled={uploadingImage}
                   />
-                  <IconButton 
-                    component="span" 
+                  <IconButton
+                    component="span"
                     size="small"
                     disabled={uploadingImage}
                     sx={{ color: "white", bgcolor: "rgba(0,0,0,0.5)" }}
@@ -515,10 +527,10 @@ useEffect(() => {
                     <PhotoCamera sx={{ fontSize: 20 }} />
                   </IconButton>
                 </label>
-                
+
                 {(currentImageUrl || avatarPreview) && (
-                  <IconButton 
-                    size="small" 
+                  <IconButton
+                    size="small"
                     onClick={handleDeleteImage}
                     disabled={uploadingImage}
                     sx={{ color: "white", bgcolor: "rgba(255,0,0,0.5)" }}
@@ -527,7 +539,7 @@ useEffect(() => {
                   </IconButton>
                 )}
               </Box>
-              
+
               {uploadingImage && (
                 <Box
                   sx={{
@@ -547,10 +559,15 @@ useEffect(() => {
                 </Box>
               )}
             </Box>
-            
+
             <Box>
-              <Typography fontWeight={600}>{form.userName || "User"}</Typography>
-              <Chip label="Client" size="small" sx={{ mt: 0.5, fontSize: 11, bgcolor: "#2e7d32", color: "#fff" }} />
+              <Typography fontWeight={600}>{form.userName || "Specialist"}</Typography>
+              {/* ✅ تغيير الـ Chip إلى Specialist */}
+              <Chip
+                label="Specialist"
+                size="small"
+                sx={{ mt: 0.5, fontSize: 11, bgcolor: "#2e7d32", color: "#fff" }}
+              />
               <Typography fontSize={11} color="text.secondary" sx={{ mt: 0.5 }}>
                 {uploadingImage ? "جاري التحميل..." : "حوّم على الصورة للتعديل أو الحذف"}
               </Typography>
@@ -559,16 +576,29 @@ useEffect(() => {
 
           <Box display="flex" flexDirection="column" gap={2}>
             <TextField
-              label="Username" size="small" fullWidth
+              label="Username"
+              size="small"
+              fullWidth
               value={form.userName}
               onChange={(e) => setForm({ ...form, userName: e.target.value })}
-              sx={{ "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#2e7d32" } }}
+              sx={{
+                "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                  borderColor: "#2e7d32",
+                },
+              }}
             />
             <TextField
-              label="Email" size="small" fullWidth type="email"
+              label="Email"
+              size="small"
+              fullWidth
+              type="email"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              sx={{ "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#2e7d32" } }}
+              sx={{
+                "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                  borderColor: "#2e7d32",
+                },
+              }}
             />
           </Box>
 
@@ -577,14 +607,16 @@ useEffect(() => {
             sx={greenButtonSx}
             onClick={handleSaveProfile}
             disabled={savingProfile}
-            startIcon={savingProfile ? <CircularProgress size={20} color="inherit" /> : <Save />}
+            startIcon={
+              savingProfile ? <CircularProgress size={20} color="inherit" /> : <Save />
+            }
           >
             {savingProfile ? "جاري الحفظ..." : "Save Changes"}
           </Button>
         </CardContent>
       </Card>
 
-      {/* CHANGE PASSWORD - CORRECTED */}
+      {/* CHANGE PASSWORD */}
       <Card sx={cardSx}>
         <CardContent sx={{ p: 3 }}>
           <SectionHeader
@@ -600,20 +632,32 @@ useEffect(() => {
               { key: "confirm", label: "Confirm New Password" },
             ].map(({ key, label }) => (
               <TextField
-                key={key} label={label} size="small" fullWidth
+                key={key}
+                label={label}
+                size="small"
+                fullWidth
                 type={showPasswords[key] ? "text" : "password"}
                 value={passwords[key]}
                 onChange={(e) => setPasswords({ ...passwords, [key]: e.target.value })}
-                sx={{ "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#2e7d32" } }}
+                sx={{
+                  "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                    borderColor: "#2e7d32",
+                  },
+                }}
                 InputProps={{
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton size="small"
-                        onClick={() => setShowPasswords((p) => ({ ...p, [key]: !p[key] }))}
+                      <IconButton
+                        size="small"
+                        onClick={() =>
+                          setShowPasswords((p) => ({ ...p, [key]: !p[key] }))
+                        }
                       >
-                        {showPasswords[key]
-                          ? <VisibilityOff fontSize="small" />
-                          : <Visibility fontSize="small" />}
+                        {showPasswords[key] ? (
+                          <VisibilityOff fontSize="small" />
+                        ) : (
+                          <Visibility fontSize="small" />
+                        )}
                       </IconButton>
                     </InputAdornment>
                   ),
@@ -627,7 +671,9 @@ useEffect(() => {
             sx={greenOutlinedSx}
             onClick={handleChangePassword}
             disabled={changingPassword}
-            startIcon={changingPassword ? <CircularProgress size={20} color="inherit" /> : <Key />}
+            startIcon={
+              changingPassword ? <CircularProgress size={20} color="inherit" /> : <Key />
+            }
           >
             {changingPassword ? "جاري التغيير..." : "Update Password"}
           </Button>
@@ -643,11 +689,17 @@ useEffect(() => {
             subtitle="Choose your preferred theme"
           />
           <Box
-            display="flex" alignItems="center" justifyContent="space-between"
+            display="flex"
+            alignItems="center"
+            justifyContent="space-between"
             sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}
           >
             <Box display="flex" alignItems="center" gap={1.5}>
-              {darkMode ? <DarkMode sx={{ color: "#2e7d32" }} /> : <LightMode sx={{ color: "#f57c00" }} />}
+              {darkMode ? (
+                <DarkMode sx={{ color: "#2e7d32" }} />
+              ) : (
+                <LightMode sx={{ color: "#f57c00" }} />
+              )}
               <Box>
                 <Typography fontWeight={600} fontSize={14}>
                   {darkMode ? "Dark Mode" : "Light Mode"}
@@ -658,18 +710,15 @@ useEffect(() => {
               </Box>
             </Box>
             <Switch
-  checked={!!darkMode}
-  onChange={(e) => onThemeToggle(e.target.checked)}
-  sx={{
-    "& .MuiSwitch-switchBase.Mui-checked": { color: "#2e7d32" },
-    "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
-      bgcolor: "#2e7d32",
-    },
-  }}
-/>
-
-
-
+              checked={!!darkMode}
+              onChange={(e) => onThemeToggle(e.target.checked)}
+              sx={{
+                "& .MuiSwitch-switchBase.Mui-checked": { color: "#2e7d32" },
+                "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
+                  bgcolor: "#2e7d32",
+                },
+              }}
+            />
           </Box>
         </CardContent>
       </Card>
@@ -685,15 +734,20 @@ useEffect(() => {
 
           <Box display="flex" flexDirection="column" gap={2}>
             <Box
-              display="flex" alignItems="center" justifyContent="space-between"
+              display="flex"
+              alignItems="center"
+              justifyContent="space-between"
               sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}
             >
               <Box>
                 <Typography fontWeight={600} fontSize={14}>Log Out</Typography>
-                <Typography fontSize={12} color="text.secondary">Sign out from your account</Typography>
+                <Typography fontSize={12} color="text.secondary">
+                  Sign out from your account
+                </Typography>
               </Box>
               <Button
-                variant="outlined" startIcon={<Logout />}
+                variant="outlined"
+                startIcon={<Logout />}
                 onClick={() => setLogoutDialog(true)}
                 sx={{ borderRadius: 2, textTransform: "none" }}
               >
@@ -704,7 +758,9 @@ useEffect(() => {
             <Divider />
 
             <Box
-              display="flex" alignItems="center" justifyContent="space-between"
+              display="flex"
+              alignItems="center"
+              justifyContent="space-between"
               sx={{
                 p: 2,
                 borderRadius: 2,
@@ -715,15 +771,19 @@ useEffect(() => {
                     ? "rgba(211, 47, 47, 0.08)"
                     : "#fff5f5",
               }}
-                          >
+            >
               <Box>
-                <Typography fontWeight={600} fontSize={14} color="error.main">Delete Account</Typography>
+                <Typography fontWeight={600} fontSize={14} color="error.main">
+                  Delete Account
+                </Typography>
                 <Typography fontSize={12} color="text.secondary">
                   Permanently remove your account and data
                 </Typography>
               </Box>
               <Button
-                variant="outlined" color="error" startIcon={<DeleteForever />}
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteForever />}
                 onClick={() => setDeleteDialog(true)}
                 sx={{ borderRadius: 2, textTransform: "none" }}
               >
@@ -735,36 +795,9 @@ useEffect(() => {
       </Card>
 
       {/* DIALOGS */}
-      <Dialog open={logoutDialog} onClose={() => setLogoutDialog(false)}PaperProps={{
-  sx: {
-    borderRadius: 3,
-    bgcolor: "background.paper",
-    color: "text.primary",
-    backgroundImage: "none",
-  },
-}}
->
-        <DialogTitle fontWeight={700}>Log Out?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>Are you sure you want to log out of your account?</DialogContentText>
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setLogoutDialog(false)} sx={{ borderRadius: 2, textTransform: "none" }}>
-            Cancel
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={handleLogout} 
-            sx={{ borderRadius: 2, textTransform: "none", bgcolor: "#2e7d32", "&:hover": { bgcolor: "#1b5e20" } }}
-          >
-            Yes, Log Out
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog
-        open={deleteDialog}
-        onClose={() => { setDeleteDialog(false); setDeletePassword(""); }}
+        open={logoutDialog}
+        onClose={() => setLogoutDialog(false)}
         PaperProps={{
           sx: {
             borderRadius: 3,
@@ -773,24 +806,77 @@ useEffect(() => {
             backgroundImage: "none",
           },
         }}
-        
       >
-        <DialogTitle fontWeight={700} color="error.main">Delete Account</DialogTitle>
+        <DialogTitle fontWeight={700}>Log Out?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to log out of your account?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button
+            onClick={() => setLogoutDialog(false)}
+            sx={{ borderRadius: 2, textTransform: "none" }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleLogout}
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              bgcolor: "#2e7d32",
+              "&:hover": { bgcolor: "#1b5e20" },
+            }}
+          >
+            Yes, Log Out
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={deleteDialog}
+        onClose={() => {
+          setDeleteDialog(false);
+          setDeletePassword("");
+        }}
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            bgcolor: "background.paper",
+            color: "text.primary",
+            backgroundImage: "none",
+          },
+        }}
+      >
+        <DialogTitle fontWeight={700} color="error.main">
+          Delete Account
+        </DialogTitle>
         <DialogContent>
           <DialogContentText mb={2}>
-            This action is <strong>permanent and irreversible</strong>.
-            Enter your password to confirm.
+            This action is <strong>permanent and irreversible</strong>. Enter your
+            password to confirm.
           </DialogContentText>
           <TextField
-            fullWidth size="small" label="Password"
+            fullWidth
+            size="small"
+            label="Password"
             type={showDeletePassword ? "text" : "password"}
             value={deletePassword}
             onChange={(e) => setDeletePassword(e.target.value)}
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setShowDeletePassword((p) => !p)}>
-                    {showDeletePassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                  <IconButton
+                    size="small"
+                    onClick={() => setShowDeletePassword((p) => !p)}
+                  >
+                    {showDeletePassword ? (
+                      <VisibilityOff fontSize="small" />
+                    ) : (
+                      <Visibility fontSize="small" />
+                    )}
                   </IconButton>
                 </InputAdornment>
               ),
@@ -799,15 +885,22 @@ useEffect(() => {
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
           <Button
-            onClick={() => { setDeleteDialog(false); setDeletePassword(""); }}
+            onClick={() => {
+              setDeleteDialog(false);
+              setDeletePassword("");
+            }}
             sx={{ borderRadius: 2, textTransform: "none" }}
           >
             Cancel
           </Button>
           <Button
-            variant="contained" color="error"
+            variant="contained"
+            color="error"
             disabled={!deletePassword}
-            onClick={() => { setDeleteDialog(false); handleDelete(); }}
+            onClick={() => {
+              setDeleteDialog(false);
+              handleDelete();
+            }}
             sx={{ borderRadius: 2, textTransform: "none" }}
           >
             Delete My Account

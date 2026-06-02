@@ -14,12 +14,59 @@ import axios from "axios";
 export default function ClientDashboard() {
   const [user, setUser] = useState(null);
   const [plan, setPlan] = useState(null);
+  const [progress, setProgress] = useState([]);
+  const [weightChange, setWeightChange] = useState(null);
+  const [nextMeal, setNextMeal] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // حساب أقرب وجبة قادمة
+  const calculateNextMeal = (meals) => {
+    if (!meals || meals.length === 0) return null;
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const sorted = meals
+      .map((meal) => {
+        if (!meal.mealTime) return null;
+        const [hours, minutes] = meal.mealTime.split(":").map(Number);
+        const mealMinutes = hours * 60 + minutes;
+        return { ...meal, mealMinutes };
+      })
+      .filter((m) => m !== null)
+      .sort((a, b) => a.mealMinutes - b.mealMinutes);
+
+    const upcoming = sorted.find((m) => m.mealMinutes > currentMinutes);
+    if (upcoming) {
+      const diffMinutes = upcoming.mealMinutes - currentMinutes;
+      const hours = Math.floor(diffMinutes / 60);
+      const minutes = diffMinutes % 60;
+      let timeStr = "";
+      if (hours > 0) timeStr += `${hours}h `;
+      if (minutes > 0) timeStr += `${minutes}m`;
+      return {
+        name: upcoming.mealName || upcoming.mealType,
+        time: upcoming.mealTime,
+        minutesLeft: diffMinutes,
+        display: `${upcoming.mealType || "Meal"} in ${timeStr}`,
+      };
+    }
+    return null;
+  };
+
+  // حساب التغير في الوزن
+  const calculateWeightChange = (progressData) => {
+    if (!progressData || progressData.length < 2) return null;
+    const sorted = [...progressData].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const lastWeight = sorted[0].weight;
+    const prevWeight = sorted[1].weight;
+    const change = lastWeight - prevWeight;
+    return { change, lastWeight, prevWeight };
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
-
     if (!token) {
       setError("No authentication token found");
       setLoading(false);
@@ -28,50 +75,77 @@ export default function ClientDashboard() {
 
     try {
       const decoded = JSON.parse(atob(token.split(".")[1]));
+      console.log("Decoded token:", decoded); // لمعرفة الحقول المتوفرة
 
-      setUser({
-        userName:
-          decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"] ||
-          decoded["unique_name"] ||
-          decoded["name"] ||
-          decoded["email"] ||
-          "User",
-        id: decoded[
-          "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
-        ],
-      });
+      // محاولة استخراج الاسم من عدة حقول محتملة
+      const userName =
+        decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"] ||
+        decoded["name"] ||
+        decoded["unique_name"] ||
+        decoded["email"] ||
+        decoded["given_name"] ||
+        decoded["fullName"] ||
+        "User";
+      const clientId = decoded["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"];
 
+      if (!clientId) {
+        setError("Client ID not found in token");
+        setLoading(false);
+        return;
+      }
+
+      setUser({ userName, id: clientId });
+
+      // 1. جلب الخطة الحالية
       axios
-        .get(
-          "https://nutrilife.runasp.net/api/MealPlan/clientPlansS/2afec376-23fc-467f-8621-8e0ad752dd99",
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        )
+        .get(`https://nutrilife.runasp.net/api/MealPlan/clientPlans-Summary/${clientId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
         .then((res) => {
+          console.log("PLAN ✅", res.data);
           setPlan(res.data);
-          setLoading(false);
+          if (res.data?.meals) {
+            setNextMeal(calculateNextMeal(res.data.meals));
+          }
         })
         .catch((err) => {
-          setError(err.response?.data?.message || "Failed to load meal plan");
-          setLoading(false);
+          console.log("PLAN ERROR ❌", err.response);
+          // لا نضع error عام هنا حتى لا نوقف عرض باقي العناصر
         });
+
+      // 2. جلب تقدم الوزن (مع التأكد من المسار الصحيح)
+      // ملاحظة: إذا كان الـ API يحتاج nutritionistId فيجب توفيره. حالياً نستخدم المسار الأصلي.
+      axios
+        .get(`https://nutrilife.runasp.net/api/Progress/clientProgress/${clientId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => {
+          console.log("PROGRESS ✅", res.data);
+          setProgress(res.data);
+          setWeightChange(calculateWeightChange(res.data));
+        })
+        .catch((err) => {
+          console.log("PROGRESS ERROR ❌", err.response);
+          if (err.response?.status === 404) {
+            console.warn("Progress endpoint may require nutritionistId. Using fallback.");
+          }
+        });
+
+      setLoading(false);
     } catch (err) {
+      console.error("Token decoding error:", err);
       setError("Invalid token");
       setLoading(false);
     }
   }, []);
 
+  const totalPlannedCalories = plan?.meals?.reduce((sum, meal) => sum + (meal.calories || 0), 0) || 0;
+  const goalCalories = plan?.goalCalories || 2500;
+  const calorieProgressPercent = goalCalories > 0 ? (totalPlannedCalories / goalCalories) * 100 : 0;
+
   if (error) {
     return (
-      <Box
-        sx={{
-          minHeight: "100vh",
-          bgcolor: "background.default",
-          color: "text.primary",
-          p: 3,
-        }}
-      >
+      <Box sx={{ p: 3 }}>
         <Alert severity="error">{error}</Alert>
       </Box>
     );
@@ -79,210 +153,107 @@ export default function ClientDashboard() {
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          minHeight: "60vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          bgcolor: "background.default",
-          color: "text.primary",
-        }}
-      >
+      <Box sx={{ display: "flex", justifyContent: "center", mt: 8 }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box
-      sx={{
-        bgcolor: "background.default",
-        color: "text.primary",
-        minHeight: "100vh",
-      }}
-    >
+    <Box sx={{ minHeight: "100vh" }}>
+      {/* الترحيب */}
       <Typography variant="h5" fontWeight="bold" mb={1}>
         Welcome back, {user?.userName} 👋
       </Typography>
-
       <Typography color="text.secondary" mb={3}>
         Your health journey is looking great this week.
       </Typography>
 
-      <Card
-        sx={{
-          borderRadius: 3,
-          mb: 4,
-          bgcolor: "background.paper",
-          color: "text.primary",
-        }}
-      >
-        <CardContent>
-          <Typography fontWeight="bold" mb={2}>
-            Weekly Snapshot
-          </Typography>
-
-          <Box display="flex" gap={2}>
-            {[60, 80, 90, 50, 85, 30, 70].map((val, i) => (
-              <Box
-                key={i}
-                sx={{
-                  width: 30,
-                  height: val,
-                  bgcolor: i === 5 ? "#facc15" : "primary.main",
-                  borderRadius: 2,
-                }}
-              />
-            ))}
-          </Box>
-        </CardContent>
-      </Card>
-
       <Grid container spacing={3}>
+        {/* 1. السعرات اليومية */}
         <Grid item xs={12} md={3}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-              height: "100%",
-            }}
-          >
+          <Card sx={{ borderRadius: 3, height: "100%" }}>
             <CardContent>
               <Typography>Daily Calories</Typography>
-
-              <Typography variant="h4" fontWeight="bold">
-                {plan?.calories || 1850}
-              </Typography>
-
-              <Typography color="text.secondary">
-                Goal: {plan?.goalCalories || 2500} kcal
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={3}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-              height: "100%",
-            }}
-          >
-            <CardContent>
-              <Typography mb={1}>Macros</Typography>
-
-              <Typography fontSize={14}>Carbs</Typography>
-              <LinearProgress
-                variant="determinate"
-                value={plan?.carbs || 60}
-                sx={{ mb: 1 }}
-              />
-
-              <Typography fontSize={14}>Protein</Typography>
-              <LinearProgress
-                variant="determinate"
-                value={plan?.protein || 40}
-                sx={{ mb: 1 }}
-              />
-
-              <Typography fontSize={14}>Fats</Typography>
-              <LinearProgress variant="determinate" value={plan?.fats || 30} />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={3}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-              height: "100%",
-            }}
-          >
-            <CardContent>
-              <Typography>Water</Typography>
-              <Typography variant="h5">5 / 8 glasses</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={3}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-              height: "100%",
-            }}
-          >
-            <CardContent>
-              <Typography mb={1}>Meal Plan</Typography>
-
-              {plan?.meals?.length > 0 ? (
-                plan.meals.map((meal, index) => (
-                  <Typography key={index} fontSize={14}>
-                    {meal.mealType}: {meal.mealName}
-                  </Typography>
-                ))
-              ) : (
+              {plan ? (
                 <>
-                  <Typography fontSize={14}>🍳 Breakfast: Oatmeal</Typography>
-                  <Typography fontSize={14}>🥗 Lunch: Chicken Salad</Typography>
+                  <Typography variant="h4" fontWeight="bold">
+                    {totalPlannedCalories} / {goalCalories}
+                  </Typography>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(calorieProgressPercent, 100)}
+                    sx={{ my: 1, height: 8, borderRadius: 4 }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {calorieProgressPercent.toFixed(0)}% of goal
+                  </Typography>
                 </>
+              ) : (
+                <Typography color="warning.main" variant="body2">
+                  No active meal plan
+                </Typography>
               )}
             </CardContent>
           </Card>
         </Grid>
-      </Grid>
 
-      <Grid container spacing={3} mt={2}>
-        <Grid item xs={12} md={8}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-            }}
-          >
+        {/* 2. الوزن الأسبوعي */}
+        <Grid item xs={12} md={3}>
+          <Card sx={{ borderRadius: 3, height: "100%" }}>
             <CardContent>
-              <Typography fontWeight="bold" mb={2}>
-                Weight Progress
-              </Typography>
-
-              <Box
-                sx={{
-                  height: 120,
-                  bgcolor: (theme) =>
-                    theme.palette.mode === "dark"
-                      ? "rgba(255,255,255,0.08)"
-                      : "#e5e7eb",
-                  borderRadius: 2,
-                }}
-              />
+              <Typography>Weight Progress</Typography>
+              {weightChange ? (
+                <>
+                  <Typography variant="h4" fontWeight="bold">
+                    {weightChange.lastWeight} kg
+                  </Typography>
+                  <Typography
+                    color={weightChange.change < 0 ? "success.main" : "error.main"}
+                  >
+                    {weightChange.change > 0 ? `+${weightChange.change.toFixed(1)}` : `${weightChange.change.toFixed(1)}`} kg this week
+                  </Typography>
+                </>
+              ) : (
+                <Typography color="text.secondary">Not enough data</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={4}>
-          <Card
-            sx={{
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-            }}
-          >
+        {/* 3. أقرب وجبة */}
+        <Grid item xs={12} md={3}>
+          <Card sx={{ borderRadius: 3, height: "100%" }}>
             <CardContent>
-              <Typography fontWeight="bold" mb={2}>
-                Recent Activity
-              </Typography>
+              <Typography>Next Meal</Typography>
+              {nextMeal ? (
+                <>
+                  <Typography variant="h6">{nextMeal.name}</Typography>
+                  <Typography variant="body2" color="primary">
+                    {nextMeal.display}
+                  </Typography>
+                </>
+              ) : (
+                <Typography color="text.secondary">No upcoming meals</Typography>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
 
-              <Typography fontSize={14}>✔ Logged Breakfast</Typography>
-              <Typography fontSize={14}>✔ Updated Weight</Typography>
+        {/* 4. الماكروز */}
+        <Grid item xs={12} md={3}>
+          <Card sx={{ borderRadius: 3, height: "100%" }}>
+            <CardContent>
+              <Typography>Macros</Typography>
+              {plan ? (
+                <>
+                  <Typography fontSize={14}>Protein: {plan?.protein || 0}g</Typography>
+                  <Typography fontSize={14}>Carbs: {plan?.carbs || 0}g</Typography>
+                  <Typography fontSize={14}>Fats: {plan?.fats || 0}g</Typography>
+                </>
+              ) : (
+                <Typography color="text.secondary">No data</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>

@@ -56,7 +56,7 @@ const ChatBubble = styled(Paper)(({ theme, isclient }) => ({
   backgroundImage: "none",
 }));
 
-function Messages() {
+function ClientMessages() {
   const [newMessage, setNewMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [snackbar, setSnackbar] = useState({
@@ -676,4 +676,4 @@ function Messages() {
   );
 }
 
-export default Messages;
+export default ClientMessages;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Paper,
@@ -22,15 +22,20 @@ import {
   TableHead,
   TableRow,
   IconButton,
+  Alert,
+  CircularProgress,
 } from "@mui/material";
 import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   FitnessCenter as FitnessCenterIcon,
-  WaterDrop as WaterIcon,
-  LocalFireDepartment as CaloriesIcon,
+  InsertDriveFile as FileIcon,
   Add as AddIcon,
-  CheckCircle as CheckIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Download as DownloadIcon,
+  CloudUpload as UploadIcon,
+  AutoAwesome as AiIcon,
 } from "@mui/icons-material";
 import {
   LineChart,
@@ -42,75 +47,380 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+const API_BASE_URL = "https://nutrilife.runasp.net/api/ProgressTracking";
+
+const CLIENT_ID =
+  localStorage.getItem("clientId") || "2afec376-23fc-467f-8621-8e0ad752dd99";
+
+const NUTRITIONIST_ID = localStorage.getItem("nutritionistId");
+const CREATOR_ROLE = localStorage.getItem("role") || "Client";
+const SUBSCRIPTION_ID = Number(localStorage.getItem("subscriptionId") || 5);
+
+const getToken = () => localStorage.getItem("token");
+
+const authHeaders = () => {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+const pick = (obj, keys, fallback = undefined) => {
+  for (const key of keys) {
+    if (obj?.[key] !== undefined && obj?.[key] !== null) return obj[key];
+  }
+  return fallback;
+};
+
+const asArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.measurements)) return value.measurements;
+  if (Array.isArray(value?.Measurements)) return value.Measurements;
+  if (Array.isArray(value?.files)) return value.files;
+  if (Array.isArray(value?.Files)) return value.Files;
+  return [];
+};
+
+const formatChartDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return `${date.getDate()}/${date.getMonth() + 1}`;
+};
+
+const emptyMeasurement = {
+  Weight: "",
+  Height: "",
+  WaistCircumference: "",
+  HipCircumference: "",
+  ChestCircumference: "",
+  ArmCircumference: "",
+  ThighCircumference: "",
+};
+
 function Progress() {
-  const [openWeightDialog, setOpenWeightDialog] = useState(false);
-  const [newWeight, setNewWeight] = useState("");
-  const [newDate, setNewDate] = useState(
-    new Date().toISOString().split("T")[0]
+  const [progress, setProgress] = useState(null);
+  const [measurements, setMeasurements] = useState([]);
+  const [files, setFiles] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [error, setError] = useState("");
+
+  const [openMeasurementDialog, setOpenMeasurementDialog] = useState(false);
+  const [editingMeasurement, setEditingMeasurement] = useState(null);
+  const [measurementForm, setMeasurementForm] = useState(emptyMeasurement);
+
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  const progressUrl = NUTRITIONIST_ID
+    ? `${API_BASE_URL}/clientProgress/${CLIENT_ID}/${NUTRITIONIST_ID}`
+    : `${API_BASE_URL}/clientProgress/${CLIENT_ID}`;
+
+  const healthTrackingId = pick(
+    progress,
+    ["healthTrackingId", "HealthTrackingId", "id", "Id"],
+    pick(measurements[0], ["healthTrackingId", "HealthTrackingId"])
   );
 
-  const [weightData, setWeightData] = useState([
-    { date: "01/01", weight: 75 },
-    { date: "05/01", weight: 74.5 },
-    { date: "10/01", weight: 74 },
-    { date: "15/01", weight: 73.2 },
-    { date: "20/01", weight: 72.8 },
-  ]);
+  const loadProgress = async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-  const [dailyMeals, setDailyMeals] = useState([
-    { id: 1, meal: "الإفطار", calories: 350, protein: 15, carbs: 45, fats: 10, completed: true },
-    { id: 2, meal: "وجبة خفيفة", calories: 120, protein: 5, carbs: 18, fats: 4, completed: true },
-    { id: 3, meal: "الغداء", calories: 550, protein: 35, carbs: 60, fats: 18, completed: false },
-    { id: 4, meal: "وجبة خفيفة", calories: 150, protein: 8, carbs: 15, fats: 6, completed: false },
-    { id: 5, meal: "العشاء", calories: 400, protein: 25, carbs: 35, fats: 12, completed: false },
-  ]);
+      const response = await fetch(progressUrl, {
+        headers: {
+          ...authHeaders(),
+        },
+      });
 
-  const weeklyAchievements = {
-    workouts: 3,
-    workoutGoal: 5,
-    waterIntake: 28,
-    waterGoal: 56,
-    mealsLogged: 18,
-    mealGoal: 35,
-    weightLost: 2.2,
-    weightGoal: 5,
-  };
+      if (!response.ok) {
+        throw new Error("تعذر تحميل بيانات التقدم");
+      }
 
-  const totalCalories = dailyMeals.reduce(
-    (sum, meal) => sum + (meal.completed ? meal.calories : 0),
-    0
-  );
-  const goalCalories = 2500;
-  const caloriesPercentage = (totalCalories / goalCalories) * 100;
+      const result = await response.json();
+      const data = result?.data || result;
 
-  const handleAddWeight = () => {
-    if (newWeight) {
-      const newDateObj = { date: newDate, weight: parseFloat(newWeight) };
-      setWeightData([...weightData, newDateObj]);
-      setNewWeight("");
-      setOpenWeightDialog(false);
+      setProgress(data);
+
+      const nextMeasurements =
+        data?.measurements ||
+        data?.Measurements ||
+        data?.healthMeasurements ||
+        data?.HealthMeasurements ||
+        data?.measurement ||
+        data?.Measurement ||
+        [];
+
+      const nextFiles =
+        data?.files ||
+        data?.Files ||
+        data?.inbodyFiles ||
+        data?.InbodyFiles ||
+        data?.uploadedFiles ||
+        data?.UploadedFiles ||
+        [];
+
+      setMeasurements(asArray(nextMeasurements));
+      setFiles(asArray(nextFiles));
+    } catch (err) {
+      setError(err.message || "صار خطأ أثناء تحميل البيانات");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleToggleMeal = (id) => {
-    setDailyMeals((prev) =>
-      prev.map((meal) =>
-        meal.id === id ? { ...meal, completed: !meal.completed } : meal
-      )
-    );
-  };
+  useEffect(() => {
+    loadProgress();
+  }, []);
 
-  const macroData = [
-    { name: "بروتين", value: 88, target: 120, color: "#4caf50" },
-    { name: "كربوهيدرات", value: 158, target: 250, color: "#ff9800" },
-    { name: "دهون", value: 50, target: 70, color: "#f44336" },
+  const weightData = useMemo(() => {
+    return measurements
+      .map((item) => ({
+        id: pick(item, ["id", "Id", "measurementId", "MeasurementId"]),
+        date: formatChartDate(
+          pick(item, [
+            "createdAt",
+            "CreatedAt",
+            "date",
+            "Date",
+            "measurementDate",
+            "MeasurementDate",
+          ])
+        ),
+        weight: Number(pick(item, ["weight", "Weight"], 0)),
+      }))
+      .filter((item) => item.weight > 0);
+  }, [measurements]);
+
+  const latestMeasurement = measurements[measurements.length - 1];
+  const previousMeasurement = measurements[measurements.length - 2];
+
+  const currentWeight = Number(
+    pick(latestMeasurement, ["weight", "Weight"], weightData.at(-1)?.weight || 0)
+  );
+
+  const previousWeight = Number(
+    pick(
+      previousMeasurement,
+      ["weight", "Weight"],
+      weightData.at(-2)?.weight || currentWeight
+    )
+  );
+
+  const firstWeight = Number(weightData[0]?.weight || currentWeight);
+  const weightDifference = (firstWeight - currentWeight).toFixed(1);
+
+  const measurementStats = [
+    {
+      label: "الطول",
+      value: `${pick(latestMeasurement, ["height", "Height"], "-")} سم`,
+      progress: Math.min((Number(pick(latestMeasurement, ["height", "Height"], 0)) / 200) * 100, 100),
+      icon: <FitnessCenterIcon />,
+      color: "primary.light",
+    },
+    {
+      label: "محيط الخصر",
+      value: `${pick(latestMeasurement, ["waistCircumference", "WaistCircumference"], "-")} سم`,
+      progress: Math.min((Number(pick(latestMeasurement, ["waistCircumference", "WaistCircumference"], 0)) / 120) * 100, 100),
+      icon: <FitnessCenterIcon />,
+      color: "success.light",
+    },
+    {
+      label: "محيط الورك",
+      value: `${pick(latestMeasurement, ["hipCircumference", "HipCircumference"], "-")} سم`,
+      progress: Math.min((Number(pick(latestMeasurement, ["hipCircumference", "HipCircumference"], 0)) / 140) * 100, 100),
+      icon: <FitnessCenterIcon />,
+      color: "info.light",
+    },
+    {
+      label: "ملفات InBody",
+      value: `${files.length}`,
+      progress: files.length ? 100 : 0,
+      icon: <FileIcon />,
+      color: "warning.light",
+    },
   ];
 
-  const currentWeight = weightData[weightData.length - 1]?.weight || 0;
-  const previousWeight =
-    weightData[weightData.length - 2]?.weight || currentWeight;
-  const firstWeight = weightData[0]?.weight || currentWeight;
-  const weightDifference = (firstWeight - currentWeight).toFixed(1);
+  const openAddMeasurement = () => {
+    setEditingMeasurement(null);
+    setMeasurementForm(emptyMeasurement);
+    setOpenMeasurementDialog(true);
+  };
+
+  const openEditMeasurement = (item) => {
+    setEditingMeasurement(item);
+    setMeasurementForm({
+      Weight: pick(item, ["weight", "Weight"], ""),
+      Height: pick(item, ["height", "Height"], ""),
+      WaistCircumference: pick(item, ["waistCircumference", "WaistCircumference"], ""),
+      HipCircumference: pick(item, ["hipCircumference", "HipCircumference"], ""),
+      ChestCircumference: pick(item, ["chestCircumference", "ChestCircumference"], ""),
+      ArmCircumference: pick(item, ["armCircumference", "ArmCircumference"], ""),
+      ThighCircumference: pick(item, ["thighCircumference", "ThighCircumference"], ""),
+    });
+    setOpenMeasurementDialog(true);
+  };
+
+  const handleMeasurementChange = (field, value) => {
+    setMeasurementForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const buildMeasurementBody = () => ({
+    HealthTrackingId: Number(healthTrackingId),
+    Weight: Number(measurementForm.Weight),
+    Height: Number(measurementForm.Height),
+    WaistCircumference: Number(measurementForm.WaistCircumference),
+    HipCircumference: Number(measurementForm.HipCircumference),
+    ChestCircumference: Number(measurementForm.ChestCircumference),
+    ArmCircumference: Number(measurementForm.ArmCircumference),
+    ThighCircumference: Number(measurementForm.ThighCircumference),
+    creatorRole: CREATOR_ROLE,
+  });
+
+  const handleSaveMeasurement = async () => {
+    if (!healthTrackingId) {
+      setError("لا يوجد HealthTrackingId. لازم يكون موجود من بيانات clientProgress.");
+      return;
+    }
+
+    try {
+      setSavingMeasurement(true);
+      setError("");
+
+      const measurementId = pick(editingMeasurement, [
+        "id",
+        "Id",
+        "measurementId",
+        "MeasurementId",
+      ]);
+
+      const isEdit = Boolean(editingMeasurement && measurementId);
+
+      const response = await fetch(
+        isEdit
+          ? `${API_BASE_URL}/editMeasurement/${measurementId}`
+          : `${API_BASE_URL}/AddMeasurement/`,
+        {
+          method: isEdit ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+          body: JSON.stringify(buildMeasurementBody()),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(isEdit ? "تعذر تعديل القياس" : "تعذر إضافة القياس");
+      }
+
+      setOpenMeasurementDialog(false);
+      await loadProgress();
+    } catch (err) {
+      setError(err.message || "صار خطأ أثناء حفظ القياس");
+    } finally {
+      setSavingMeasurement(false);
+    }
+  };
+
+  const handleDeleteMeasurement = async (item) => {
+    const measurementId = pick(item, ["id", "Id", "measurementId", "MeasurementId"]);
+    if (!measurementId) return;
+
+    try {
+      setError("");
+
+      const response = await fetch(
+        `${API_BASE_URL}/DeleteMeasurement/${measurementId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+          body: JSON.stringify(buildMeasurementBody()),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("تعذر حذف القياس");
+      }
+
+      await loadProgress();
+    } catch (err) {
+      setError(err.message || "صار خطأ أثناء حذف القياس");
+    }
+  };
+
+  const handleUploadFile = async () => {
+    if (!selectedFile) return;
+
+    try {
+      setUploadingFile(true);
+      setError("");
+
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      if (healthTrackingId) {
+        formData.append("HealthTrackingId", healthTrackingId);
+      }
+
+      formData.append("ClientId", CLIENT_ID);
+      formData.append("creatorRole", CREATOR_ROLE);
+
+      const response = await fetch(`${API_BASE_URL}/UploadFile`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("تعذر رفع ملف InBody");
+      }
+
+      setSelectedFile(null);
+      await loadProgress();
+    } catch (err) {
+      setError(err.message || "صار خطأ أثناء رفع الملف");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleDownloadFile = (file) => {
+    const fileId = pick(file, ["id", "Id", "fileId", "FileId"]);
+    if (!fileId) return;
+
+    window.open(`${API_BASE_URL}/DownloadFile/${fileId}`, "_blank");
+  };
+
+  const handleDeleteFile = async (file) => {
+    const fileId = pick(file, ["id", "Id", "fileId", "FileId"]);
+    if (!fileId) return;
+
+    try {
+      setError("");
+
+      const response = await fetch(`${API_BASE_URL}/DeleteFile/${fileId}`, {
+        method: "DELETE",
+        headers: {
+          ...authHeaders(),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("تعذر حذف الملف");
+      }
+
+      await loadProgress();
+    } catch (err) {
+      setError(err.message || "صار خطأ أثناء حذف الملف");
+    }
+  };
 
   const StatCard = ({ icon, label, value, progress, color = "primary.light" }) => (
     <Card
@@ -138,7 +448,7 @@ function Progress() {
 
         <LinearProgress
           variant="determinate"
-          value={progress}
+          value={Number.isFinite(progress) ? progress : 0}
           sx={{ mt: 2, height: 8, borderRadius: 4 }}
         />
       </CardContent>
@@ -172,297 +482,292 @@ function Progress() {
         </Typography>
       </Paper>
 
-      <Paper
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 3,
-          bgcolor: "background.paper",
-          color: "text.primary",
-          border: "1px solid",
-          borderColor: "divider",
-          backgroundImage: "none",
-        }}
-      >
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            mb: 2,
-            flexWrap: "wrap",
-            gap: 2,
-          }}
-        >
-          <Typography variant="h6" fontWeight="bold">
-            تقدم الوزن
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {loading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          <Paper
+            sx={{
+              p: 3,
+              mb: 3,
+              borderRadius: 3,
+              bgcolor: "background.paper",
+              color: "text.primary",
+              border: "1px solid",
+              borderColor: "divider",
+              backgroundImage: "none",
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+                flexWrap: "wrap",
+                gap: 2,
+              }}
+            >
+              <Typography variant="h6" fontWeight="bold">
+                تقدم الوزن
+              </Typography>
+
+              <Button
+                startIcon={<AddIcon />}
+                variant="outlined"
+                size="small"
+                onClick={openAddMeasurement}
+              >
+                إضافة قياس
+              </Button>
+            </Box>
+
+            {weightData.length ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={weightData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.35)" />
+                  <XAxis dataKey="date" stroke="currentColor" />
+                  <YAxis domain={["auto", "auto"]} stroke="currentColor" />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="weight"
+                    stroke="#4caf50"
+                    strokeWidth={3}
+                    dot={{ fill: "#4caf50", r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <Alert severity="info">لا توجد قياسات وزن بعد.</Alert>
+            )}
+
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-around",
+                mt: 3,
+                flexWrap: "wrap",
+                gap: 2,
+              }}
+            >
+              <Box sx={{ textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                  الوزن السابق
+                </Typography>
+                <Typography variant="h6">{previousWeight || "-"} كجم</Typography>
+              </Box>
+
+              <Box sx={{ textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                  الوزن الحالي
+                </Typography>
+                <Typography variant="h6" color="primary.main">
+                  {currentWeight || "-"} كجم
+                </Typography>
+              </Box>
+
+              <Box sx={{ textAlign: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                  الفرق الكلي
+                </Typography>
+
+                <Typography
+                  variant="h6"
+                  color={currentWeight < firstWeight ? "success.main" : "error.main"}
+                >
+                  {weightDifference} كجم
+                  {currentWeight < firstWeight ? (
+                    <TrendingDownIcon fontSize="small" sx={{ ml: 0.5 }} />
+                  ) : (
+                    <TrendingUpIcon fontSize="small" sx={{ ml: 0.5 }} />
+                  )}
+                </Typography>
+              </Box>
+            </Box>
+          </Paper>
+
+          <Typography variant="h6" fontWeight="bold" mb={2}>
+            ملخص القياسات
           </Typography>
 
-          <Button
-            startIcon={<AddIcon />}
-            variant="outlined"
-            size="small"
-            onClick={() => setOpenWeightDialog(true)}
-          >
-            إضافة قياس
-          </Button>
-        </Box>
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            {measurementStats.map((item) => (
+              <Grid item xs={12} sm={6} md={3} key={item.label}>
+                <StatCard {...item} />
+              </Grid>
+            ))}
+          </Grid>
 
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={weightData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.35)" />
-            <XAxis dataKey="date" stroke="currentColor" />
-            <YAxis domain={["auto", "auto"]} stroke="currentColor" />
-            <Tooltip />
-            <Line
-              type="monotone"
-              dataKey="weight"
-              stroke="#4caf50"
-              strokeWidth={3}
-              dot={{ fill: "#4caf50", r: 6 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={7}>
+              <Paper
+                sx={{
+                  p: 3,
+                  borderRadius: 3,
+                  height: "100%",
+                  bgcolor: "background.paper",
+                  color: "text.primary",
+                  border: "1px solid",
+                  borderColor: "divider",
+                  backgroundImage: "none",
+                }}
+              >
+                <Typography variant="h6" fontWeight="bold" mb={2}>
+                  قياسات الجسم
+                </Typography>
 
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-around",
-            mt: 3,
-            flexWrap: "wrap",
-            gap: 2,
-          }}
-        >
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="body2" color="text.secondary">
-              الوزن السابق
-            </Typography>
-            <Typography variant="h6">{previousWeight} كجم</Typography>
-          </Box>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>الوزن</TableCell>
+                        <TableCell align="center">الطول</TableCell>
+                        <TableCell align="center">الخصر</TableCell>
+                        <TableCell align="center">الورك</TableCell>
+                        <TableCell align="center">الصدر</TableCell>
+                        <TableCell align="center">الذراع</TableCell>
+                        <TableCell align="center">الفخذ</TableCell>
+                        <TableCell align="center">إجراءات</TableCell>
+                      </TableRow>
+                    </TableHead>
 
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="body2" color="text.secondary">
-              الوزن الحالي
-            </Typography>
-            <Typography variant="h6" color="primary.main">
-              {currentWeight} كجم
-            </Typography>
-          </Box>
+                    <TableBody>
+                      {measurements.map((item, index) => (
+                        <TableRow key={pick(item, ["id", "Id"], index)}>
+                          <TableCell>{pick(item, ["weight", "Weight"], "-")} كجم</TableCell>
+                          <TableCell align="center">{pick(item, ["height", "Height"], "-")}</TableCell>
+                          <TableCell align="center">{pick(item, ["waistCircumference", "WaistCircumference"], "-")}</TableCell>
+                          <TableCell align="center">{pick(item, ["hipCircumference", "HipCircumference"], "-")}</TableCell>
+                          <TableCell align="center">{pick(item, ["chestCircumference", "ChestCircumference"], "-")}</TableCell>
+                          <TableCell align="center">{pick(item, ["armCircumference", "ArmCircumference"], "-")}</TableCell>
+                          <TableCell align="center">{pick(item, ["thighCircumference", "ThighCircumference"], "-")}</TableCell>
+                          <TableCell align="center">
+                            <IconButton size="small" onClick={() => openEditMeasurement(item)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteMeasurement(item)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
 
-          <Box sx={{ textAlign: "center" }}>
-            <Typography variant="body2" color="text.secondary">
-              الفرق الكلي
-            </Typography>
+                      {!measurements.length && (
+                        <TableRow>
+                          <TableCell colSpan={8} align="center">
+                            لا توجد قياسات بعد
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </Grid>
 
-            <Typography
-              variant="h6"
-              color={currentWeight < firstWeight ? "success.main" : "error.main"}
-            >
-              {weightDifference} كجم
-              {currentWeight < firstWeight ? (
-                <TrendingDownIcon fontSize="small" sx={{ ml: 0.5 }} />
-              ) : (
-                <TrendingUpIcon fontSize="small" sx={{ ml: 0.5 }} />
-              )}
-            </Typography>
-          </Box>
-        </Box>
-      </Paper>
+            <Grid item xs={12} md={5}>
+              <Paper
+                sx={{
+                  p: 3,
+                  borderRadius: 3,
+                  bgcolor: "background.paper",
+                  color: "text.primary",
+                  border: "1px solid",
+                  borderColor: "divider",
+                  backgroundImage: "none",
+                }}
+              >
+                <Typography variant="h6" fontWeight="bold" mb={2}>
+                  ملفات InBody
+                </Typography>
 
-      <Typography variant="h6" fontWeight="bold" mb={2}>
-        إنجازات هذا الأسبوع
-      </Typography>
+                <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+                  <Button variant="outlined" component="label" startIcon={<UploadIcon />}>
+                    اختيار ملف
+                    <input
+                      hidden
+                      type="file"
+                      accept=".pdf,image/*"
+                      onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    />
+                  </Button>
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            icon={<FitnessCenterIcon />}
-            label="تمارين"
-            value={`${weeklyAchievements.workouts} / ${weeklyAchievements.workoutGoal}`}
-            progress={(weeklyAchievements.workouts / weeklyAchievements.workoutGoal) * 100}
-            color="primary.light"
-          />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            icon={<WaterIcon />}
-            label="شرب الماء"
-            value={`${weeklyAchievements.waterIntake} / ${weeklyAchievements.waterGoal}`}
-            progress={(weeklyAchievements.waterIntake / weeklyAchievements.waterGoal) * 100}
-            color="info.light"
-          />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            icon={<CaloriesIcon />}
-            label="وجبات مسجلة"
-            value={`${weeklyAchievements.mealsLogged} / ${weeklyAchievements.mealGoal}`}
-            progress={(weeklyAchievements.mealsLogged / weeklyAchievements.mealGoal) * 100}
-            color="warning.light"
-          />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            icon={<FitnessCenterIcon />}
-            label="الوزن المفقود"
-            value={`${weeklyAchievements.weightLost} / ${weeklyAchievements.weightGoal}`}
-            progress={(weeklyAchievements.weightLost / weeklyAchievements.weightGoal) * 100}
-            color="success.light"
-          />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <Paper
-            sx={{
-              p: 3,
-              borderRadius: 3,
-              height: "100%",
-              bgcolor: "background.paper",
-              color: "text.primary",
-              border: "1px solid",
-              borderColor: "divider",
-              backgroundImage: "none",
-            }}
-          >
-            <Typography variant="h6" fontWeight="bold" mb={2}>
-              وجبات اليوم
-            </Typography>
-
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>الوجبة</TableCell>
-                    <TableCell align="center">سعرات</TableCell>
-                    <TableCell align="center">بروتين</TableCell>
-                    <TableCell align="center">كارب</TableCell>
-                    <TableCell align="center">دهون</TableCell>
-                    <TableCell align="center">الحالة</TableCell>
-                  </TableRow>
-                </TableHead>
-
-                <TableBody>
-                  {dailyMeals.map((meal) => (
-                    <TableRow key={meal.id} sx={{ opacity: meal.completed ? 1 : 0.6 }}>
-                      <TableCell>{meal.meal}</TableCell>
-                      <TableCell align="center">{meal.calories}</TableCell>
-                      <TableCell align="center">{meal.protein}g</TableCell>
-                      <TableCell align="center">{meal.carbs}g</TableCell>
-                      <TableCell align="center">{meal.fats}g</TableCell>
-                      <TableCell align="center">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleToggleMeal(meal.id)}
-                        >
-                          <CheckIcon color={meal.completed ? "success" : "disabled"} />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-
-                  <TableRow
-                    sx={{
-                      bgcolor: (theme) =>
-                        theme.palette.mode === "dark"
-                          ? "rgba(255,255,255,0.06)"
-                          : "grey.50",
-                    }}
+                  <Button
+                    variant="contained"
+                    disabled={!selectedFile || uploadingFile}
+                    onClick={handleUploadFile}
                   >
-                    <TableCell>
-                      <strong>المجموع</strong>
-                    </TableCell>
-                    <TableCell align="center">
-                      <strong>{totalCalories}</strong> / {goalCalories}
-                    </TableCell>
-                    <TableCell align="center">-</TableCell>
-                    <TableCell align="center">-</TableCell>
-                    <TableCell align="center">-</TableCell>
-                    <TableCell align="center"></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </TableContainer>
-
-            <LinearProgress
-              variant="determinate"
-              value={Math.min(caloriesPercentage, 100)}
-              sx={{ mt: 2, height: 10, borderRadius: 5 }}
-            />
-
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ mt: 1, display: "block" }}
-            >
-              {totalCalories} من {goalCalories} سعرة حرارية
-            </Typography>
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <Paper
-            sx={{
-              p: 3,
-              borderRadius: 3,
-              bgcolor: "background.paper",
-              color: "text.primary",
-              border: "1px solid",
-              borderColor: "divider",
-              backgroundImage: "none",
-            }}
-          >
-            <Typography variant="h6" fontWeight="bold" mb={2}>
-              الماكروز اليومية
-            </Typography>
-
-            {macroData.map((item) => (
-              <Box key={item.name} sx={{ mb: 2 }}>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    mb: 1,
-                  }}
-                >
-                  <Typography variant="body2">{item.name}</Typography>
-                  <Typography variant="body2">
-                    {item.value}g / {item.target}g
-                  </Typography>
+                    {uploadingFile ? "جاري الرفع..." : "رفع"}
+                  </Button>
                 </Box>
 
-                <LinearProgress
-                  variant="determinate"
-                  value={Math.min((item.value / item.target) * 100, 100)}
-                  sx={{
-                    height: 8,
-                    borderRadius: 4,
-                    bgcolor: (theme) =>
-                      theme.palette.mode === "dark"
-                        ? "rgba(255,255,255,0.08)"
-                        : "#e0e0e0",
-                    "& .MuiLinearProgress-bar": { bgcolor: item.color },
-                  }}
-                />
-              </Box>
-            ))}
+                {selectedFile && (
+                  <Typography variant="body2" color="text.secondary" mb={2}>
+                    الملف المختار: {selectedFile.name}
+                  </Typography>
+                )}
 
-            <Divider sx={{ my: 2 }} />
+                <TableContainer>
+                  <Table size="small">
+                    <TableBody>
+                      {files.map((file, index) => (
+                        <TableRow key={pick(file, ["id", "Id", "fileId", "FileId"], index)}>
+                          <TableCell>
+                            {pick(file, ["fileName", "FileName", "name", "Name"], `ملف ${index + 1}`)}
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton size="small" onClick={() => handleDownloadFile(file)}>
+                              <DownloadIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteFile(file)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
 
-            <Typography variant="body2" color="text.secondary" align="center">
-              الهدف اليومي: {goalCalories} سعرة حرارية
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
+                      {!files.length && (
+                        <TableRow>
+                          <TableCell align="center">لا توجد ملفات مرفوعة بعد</TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                <Divider sx={{ my: 2 }} />
+
+                <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+                  <Avatar sx={{ bgcolor: "secondary.light", color: "#fff" }}>
+                    <AiIcon />
+                  </Avatar>
+                  <Box>
+                    <Typography fontWeight="bold">تحليل InBody بالذكاء الاصطناعي</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      سيظهر التحليل هنا بعد تفعيل API الخاص بالـ AI.
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
+            </Grid>
+          </Grid>
+        </>
+      )}
 
       <Dialog
-        open={openWeightDialog}
-        onClose={() => setOpenWeightDialog(false)}
+        open={openMeasurementDialog}
+        onClose={() => setOpenMeasurementDialog(false)}
+        fullWidth
+        maxWidth="sm"
         PaperProps={{
           sx: {
             bgcolor: "background.paper",
@@ -471,34 +776,42 @@ function Progress() {
           },
         }}
       >
-        <DialogTitle>إضافة قياس جديد</DialogTitle>
+        <DialogTitle>
+          {editingMeasurement ? "تعديل القياس" : "إضافة قياس جديد"}
+        </DialogTitle>
 
         <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="الوزن (كجم)"
-            type="number"
-            fullWidth
-            value={newWeight}
-            onChange={(e) => setNewWeight(e.target.value)}
-            sx={{ mb: 2, mt: 1 }}
-          />
-
-          <TextField
-            label="التاريخ"
-            type="date"
-            fullWidth
-            value={newDate}
-            onChange={(e) => setNewDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            {[
+              ["Weight", "الوزن (كجم)"],
+              ["Height", "الطول (سم)"],
+              ["WaistCircumference", "محيط الخصر"],
+              ["HipCircumference", "محيط الورك"],
+              ["ChestCircumference", "محيط الصدر"],
+              ["ArmCircumference", "محيط الذراع"],
+              ["ThighCircumference", "محيط الفخذ"],
+            ].map(([field, label]) => (
+              <Grid item xs={12} sm={6} key={field}>
+                <TextField
+                  label={label}
+                  type="number"
+                  fullWidth
+                  value={measurementForm[field]}
+                  onChange={(e) => handleMeasurementChange(field, e.target.value)}
+                />
+              </Grid>
+            ))}
+          </Grid>
         </DialogContent>
 
         <DialogActions>
-          <Button onClick={() => setOpenWeightDialog(false)}>إلغاء</Button>
-          <Button onClick={handleAddWeight} variant="contained">
-            إضافة
+          <Button onClick={() => setOpenMeasurementDialog(false)}>إلغاء</Button>
+          <Button
+            onClick={handleSaveMeasurement}
+            variant="contained"
+            disabled={savingMeasurement}
+          >
+            {savingMeasurement ? "جاري الحفظ..." : "حفظ"}
           </Button>
         </DialogActions>
       </Dialog>
