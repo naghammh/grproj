@@ -37,7 +37,7 @@ export default function Specialists() {
 
   useEffect(() => {
     axios
-      .get("https://nutrilife.runasp.net/api/Account/allNutritionists")
+      .get("https://nutrilife.runasp.net/api/Nutritionist/allActive")
       .then(async (res) => {
         const data = res.data;
 

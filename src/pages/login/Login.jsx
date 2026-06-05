@@ -126,6 +126,18 @@ export default function Login() {
       localStorage.setItem("token", result.accessToken);
 
       const payload = JSON.parse(atob(result.accessToken.split(".")[1]));
+      const userId =
+  payload[
+    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+  ] ||
+  payload.nameid ||
+  payload.sub ||
+  payload.userId ||
+  payload.UserId;
+
+if (userId) {
+  localStorage.setItem("creatorId", userId);
+}
 
       const role =
         payload[

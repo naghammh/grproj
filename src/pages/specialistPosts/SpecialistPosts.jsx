@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -19,8 +19,6 @@ import {
 } from "@mui/material";
 import {
   Add,
-  Bookmark,
-  BookmarkBorder,
   Close,
   DeleteOutline,
   Edit,
@@ -30,221 +28,293 @@ import {
   Visibility,
 } from "@mui/icons-material";
 
-const POSTS_API = {
-  allPosts: ({ page = 1, pageSize = 10 } = {}) =>
-    `https://nutrilife.runasp.net/api/Posts?Page=${page}&PageSize=${pageSize}`,
-  addPost: "https://nutrilife.runasp.net/api/Posts",
-  updatePost: "https://nutrilife.runasp.net/api/Posts",
-  deletePost: (id) => `https://nutrilife.runasp.net/api/Posts/${id}`,
-  getPost: (id) => `https://nutrilife.runasp.net/api/Posts/${id}`,
-  getByCreator: (creatorId) =>
-    `https://nutrilife.runasp.net/api/Posts/Creator/${creatorId}`,
-  savedPosts: "https://nutrilife.runasp.net/api/Posts/saved",
-  toggleSave: (id) => `https://nutrilife.runasp.net/api/Posts/toggle/${id}`,
+const API_BASE = "https://nutrilife.runasp.net/api";
+
+const ENDPOINTS = {
+  createPost: `${API_BASE}/Posts`,
+  updatePost: `${API_BASE}/Posts`,
+  deletePost: (id) => `${API_BASE}/Posts/${id}`,
+  getPost: (id) => `${API_BASE}/Posts/${id}`,
+  getByCreator: (creatorId) => `${API_BASE}/Posts/Creator/${creatorId}`,
+  allPosts: `${API_BASE}/Posts/all`,
+  savedPosts: `${API_BASE}/Posts/saved`,
+  toggleSave: (id) => `${API_BASE}/Posts/toggle/${id}`,
 };
 
-const getToken = () => localStorage.getItem("token");
+const getValidValue = (value) => {
+  if (value === null || value === undefined) return "";
+  const stringValue = String(value).trim();
+  if (
+    !stringValue ||
+    stringValue.toLowerCase() === "null" ||
+    stringValue.toLowerCase() === "undefined"
+  ) {
+    return "";
+  }
+  return stringValue;
+};
+
+const getToken = () => getValidValue(localStorage.getItem("token"));
+
+const decodeJwtPayload = (token) => {
+  if (!token) return {};
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(window.atob(base64));
+  } catch (error) {
+    console.error("Could not decode token", error);
+    return {};
+  }
+};
+
+const getCreatorIdFromToken = () => {
+  const token = getToken();
+  const payload = decodeJwtPayload(token);
+  return getValidValue(
+    payload.nameid ||
+      payload.sub ||
+      payload.uid ||
+      payload.userId ||
+      payload.UserId ||
+      payload.id ||
+      payload.Id ||
+      payload[
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      ] ||
+      payload[
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/nameidentifier"
+      ]
+  );
+};
 
 const getStoredCreatorId = () =>
-  localStorage.getItem("creatorId") ||
-  localStorage.getItem("specialistId") ||
-  localStorage.getItem("userId") ||
-  localStorage.getItem("id");
+  getValidValue(localStorage.getItem("creatorId")) ||
+  getValidValue(localStorage.getItem("specialistId")) ||
+  getValidValue(localStorage.getItem("userId")) ||
+  getValidValue(localStorage.getItem("UserId")) ||
+  getCreatorIdFromToken();
 
 const authHeaders = () => {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-const normalizePost = (post) => {
-  const images =
-    post.postImgs ||
-    post.PostImgs ||
-    post.images ||
-    post.Images ||
-    post.postImages ||
-    [];
+// === دالة مساعدة لتوحيد الرابط (لا تزال مفيدة) ===
+const getFullImageUrl = (url) => {
+  if (!url) return "";
+  if (url.startsWith("blob:")) return url;
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  const base = "https://nutrilife.runasp.net";
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  return `${base}${cleanUrl}`;
+};
 
-  const firstImage = Array.isArray(images)
-    ? images[0]?.imageUrl || images[0]?.url || images[0]
-    : images;
+// === صورة افتراضية SVG داخلية (لا تعتمد على أي رابط خارجي) ===
+const PLACEHOLDER_SVG = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='180' viewBox='0 0 300 180'%3E%3Crect width='300' height='180' fill='%23e2e8f0'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='14' fill='%2364748b'%3ENo Image%3C/text%3E%3C/svg%3E`;
+
+const normalizePost = (post) => {
+  let imagesArray = [];
+  const rawImages =
+    post.postImgs || post.PostImgs || post.images || post.Images || [];
+
+  if (Array.isArray(rawImages)) {
+    imagesArray = rawImages
+      .map((img) => {
+        if (typeof img === "string") return img;
+        return img?.imageUrl || img?.ImageUrl || img?.url || img?.Url || "";
+      })
+      .filter(Boolean);
+  }
+
+  const firstImage = imagesArray.length > 0 ? imagesArray[0] : "";
 
   return {
-    id: post.id || post.Id,
+    id: post.id || post.Id || post.postId || post.PostId,
     title: post.title || post.Title || "",
     content: post.content || post.Content || "",
-    date: post.createdAt || post.CreatedAt || post.date || "",
-    image: firstImage || "",
-    images: Array.isArray(images) ? images : firstImage ? [firstImage] : [],
-    creatorId: post.creatorId || post.CreatorId,
+    date: post.createdAt || post.CreatedAt || post.date || post.Date || "",
+    image: firstImage,
+    images: imagesArray,
+    creatorId: post.creatorId || post.CreatorId || "",
     isSaved: post.isSaved || post.IsSaved || false,
   };
 };
 
-export default function SpecialistRecipes({ creatorId, showSavedOnly = false }) {
-  const [open, setOpen] = useState(false);
-  const [selectedPost, setSelectedPost] = useState(null);
+const normalizePostsResponse = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.posts)) return data.posts;
+  if (Array.isArray(data?.result)) return data.result;
+  if (Array.isArray(data?.data?.items)) return data.data.items;
+  if (Array.isArray(data?.data?.posts)) return data.data.posts;
+  return [];
+};
+
+export default function SpecialistPosts({ creatorId, showSavedOnly = false }) {
+  const [openModal, setOpenModal] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    fetchPosts();
-  }, [creatorId, showSavedOnly]);
+  const effectiveCreatorId = useMemo(() => {
+    const resolvedCreatorId = getValidValue(creatorId) || getStoredCreatorId();
+    if (resolvedCreatorId) {
+      localStorage.setItem("creatorId", resolvedCreatorId);
+    }
+    return resolvedCreatorId;
+  }, [creatorId]);
 
-  const fetchPosts = async () => {
+  const fetchPosts = useCallback(async () => {
+    if (!getToken()) {
+      setError("Token missing. Please log in again.");
+      return;
+    }
+    if (!effectiveCreatorId) {
+      setError("Creator ID missing. Please log in again.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
     try {
-      const currentCreatorId = creatorId || getStoredCreatorId();
-      const url = currentCreatorId
-        ? POSTS_API.getByCreator(currentCreatorId)
-        : showSavedOnly
-          ? POSTS_API.savedPosts
-          : "";
-
-      if (!url) {
-        setPosts([]);
-        setError(
-          "Creator id is missing. Pass creatorId to this page or save it in localStorage."
-        );
-        return;
-      }
-
-      const res = await fetch(url, {
-        headers: {
-          ...authHeaders(),
-        },
+      const response = await fetch(ENDPOINTS.getByCreator(effectiveCreatorId), {
+        method: "GET",
+        headers: authHeaders(),
       });
 
-      if (!res.ok) {
-        throw new Error("Could not load posts");
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP ${response.status}`);
       }
 
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : data.items || data.data || [];
-      setPosts(list.map(normalizePost));
+      const data = await response.json();
+      console.log("POSTS DATA:", data);
+      const postsArray = normalizePostsResponse(data);
+      const normalizedPosts = postsArray.map(normalizePost);
+
+      setPosts(
+        showSavedOnly
+          ? normalizedPosts.filter((post) => post.isSaved)
+          : normalizedPosts
+      );
     } catch (err) {
-      setError("Could not load posts. Please check the posts endpoint.");
+      console.error(err);
+      setError("Failed to load your posts. Please check your connection and token.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [effectiveCreatorId, showSavedOnly]);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   const handleCreatePost = async (formData) => {
+    if (!getToken()) {
+      throw new Error("Token missing. Please log in again.");
+    }
+
     const body = new FormData();
-    body.append("Title", formData.title);
-    body.append("Content", formData.content);
+    body.append("Title", formData.title.trim());
+    body.append("Content", formData.content.trim());
 
-    formData.images.forEach((file) => {
-      body.append("PostImgs", file);
-    });
+    if (formData.images && formData.images.length) {
+      formData.images.forEach((file) => {
+        body.append("PostImgs", file);
+      });
+    }
 
-    const res = await fetch(POSTS_API.addPost, {
+    const response = await fetch(ENDPOINTS.createPost, {
       method: "POST",
-      headers: {
-        ...authHeaders(),
-      },
+      headers: authHeaders(),
       body,
     });
 
-    if (!res.ok) {
-      throw new Error("Could not create post");
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Could not create post");
     }
 
     await fetchPosts();
-    setOpen(false);
   };
 
   const handleUpdatePost = async (formData) => {
-    const res = await fetch(POSTS_API.updatePost, {
+    if (!editingPost?.id) {
+      throw new Error("Post id missing.");
+    }
+
+    const payload = {
+      Id: editingPost.id,
+      Title: formData.title.trim(),
+      Content: formData.content.trim(),
+    };
+
+    const response = await fetch(ENDPOINTS.updatePost, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders(),
       },
-      body: JSON.stringify({
-        Id: selectedPost.id,
-        Title: formData.title,
-        Content: formData.content,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      throw new Error("Could not update post");
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Could not update post");
     }
 
     await fetchPosts();
-    setSelectedPost(null);
-    setOpen(false);
   };
 
   const handleDeletePost = async (postId) => {
-    const confirmed = window.confirm("Delete this post?");
-    if (!confirmed) return;
+    if (!postId) return;
+    if (!window.confirm("Delete this post permanently?")) return;
 
-    const res = await fetch(POSTS_API.deletePost(postId), {
-      method: "DELETE",
-      headers: {
-        ...authHeaders(),
-      },
-    });
+    try {
+      const response = await fetch(ENDPOINTS.deletePost(postId), {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
 
-    if (!res.ok) {
-      setError("Could not delete post. Please check the delete endpoint.");
-      return;
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Delete failed");
+      }
+
+      setPosts((prev) => prev.filter((post) => post.id !== postId));
+    } catch (err) {
+      console.error(err);
+      setError("Could not delete post. Please try again.");
     }
-
-    setPosts((prev) => prev.filter((post) => post.id !== postId));
-  };
-
-  const handleToggleSave = async (postId) => {
-    const res = await fetch(POSTS_API.toggleSave(postId), {
-      method: "POST",
-      headers: {
-        ...authHeaders(),
-      },
-    });
-
-    if (!res.ok) {
-      setError("Could not update saved posts. Please check the save endpoint.");
-      return;
-    }
-
-    setPosts((prev) =>
-      prev.map((post) =>
-        post.id === postId ? { ...post, isSaved: !post.isSaved } : post
-      )
-    );
   };
 
   const filteredPosts = useMemo(() => {
-    return posts.filter((post) => {
-      const text = `${post.title} ${post.content}`.toLowerCase();
-      return text.includes(search.toLowerCase());
-    });
+    return posts.filter((post) =>
+      `${post.title} ${post.content}`
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    );
   }, [posts, search]);
 
   const openCreateModal = () => {
-    setSelectedPost(null);
-    setOpen(true);
+    setEditingPost(null);
+    setOpenModal(true);
   };
 
   const openEditModal = (post) => {
-    setSelectedPost(post);
-    setOpen(true);
+    setEditingPost(post);
+    setOpenModal(true);
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100%",
-        bgcolor: "#f7f8fc",
-        p: { xs: 2, md: 4 },
-      }}
-    >
+    <Box sx={{ minHeight: "100%", bgcolor: "#f7f8fc", p: { xs: 2, md: 4 } }}>
       <Stack
         direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"
@@ -323,18 +393,26 @@ export default function SpecialistRecipes({ creatorId, showSavedOnly = false }) 
             <PostCard
               key={post.id}
               post={post}
-              onEdit={openEditModal}
-              onDelete={handleDeletePost}
-              onToggleSave={handleToggleSave}
+              onEdit={() => openEditModal(post)}
+              onDelete={() => handleDeletePost(post.id)}
             />
           ))}
+
+          {filteredPosts.length === 0 && !loading && (
+            <Typography
+              sx={{ gridColumn: "1/-1", textAlign: "center", py: 4 }}
+              color="text.secondary"
+            >
+              No posts yet. Click "Add Post" to create your first one.
+            </Typography>
+          )}
         </Box>
       )}
 
-      <AddPostModal
-        open={open}
-        post={selectedPost}
-        onClose={() => setOpen(false)}
+      <PostModal
+        open={openModal}
+        post={editingPost}
+        onClose={() => setOpenModal(false)}
         onCreate={handleCreatePost}
         onUpdate={handleUpdatePost}
       />
@@ -342,7 +420,34 @@ export default function SpecialistRecipes({ creatorId, showSavedOnly = false }) 
   );
 }
 
-function PostCard({ post, onEdit, onDelete, onToggleSave }) {
+// ================== مكون PostCard المُحسَّن ==================
+function PostCard({ post, onEdit, onDelete }) {
+  const [imgSrc, setImgSrc] = useState(() => {
+    const originalUrl = getFullImageUrl(post.image);
+    return originalUrl || PLACEHOLDER_SVG;
+  });
+  const [isUsingPlaceholder, setIsUsingPlaceholder] = useState(!post.image);
+
+  useEffect(() => {
+    // عند تغيير البوست، نحاول تحميل الصورة الأصلية
+    const originalUrl = getFullImageUrl(post.image);
+    if (originalUrl) {
+      setImgSrc(originalUrl);
+      setIsUsingPlaceholder(false);
+    } else {
+      setImgSrc(PLACEHOLDER_SVG);
+      setIsUsingPlaceholder(true);
+    }
+  }, [post.image]);
+
+  const handleImageError = () => {
+    // إذا فشلت الصورة الأصلية، نستبدلها بالـ SVG الداخلي
+    if (!isUsingPlaceholder) {
+      setImgSrc(PLACEHOLDER_SVG);
+      setIsUsingPlaceholder(true);
+    }
+  };
+
   return (
     <Card
       sx={{
@@ -352,12 +457,15 @@ function PostCard({ post, onEdit, onDelete, onToggleSave }) {
       }}
     >
       <Box sx={{ position: "relative", bgcolor: "#e2e8f0" }}>
-        {post.image ? (
+        {imgSrc ? (
           <CardMedia
             component="img"
             height="180"
-            image={post.image}
+            image={imgSrc}
             alt={post.title}
+            sx={{ objectFit: "cover" }}
+            onError={handleImageError}
+            crossOrigin="anonymous"
           />
         ) : (
           <Box
@@ -401,7 +509,12 @@ function PostCard({ post, onEdit, onDelete, onToggleSave }) {
           {post.title}
         </Typography>
 
-        <Typography fontSize={13} color="text.secondary" mb={2}>
+        <Typography
+          fontSize={13}
+          color="text.secondary"
+          mb={2}
+          sx={{ whiteSpace: "pre-wrap" }}
+        >
           {post.content}
         </Typography>
 
@@ -410,33 +523,11 @@ function PostCard({ post, onEdit, onDelete, onToggleSave }) {
             <IconButton size="small" sx={{ color: "#00874f" }}>
               <Visibility fontSize="small" />
             </IconButton>
-
-            <IconButton
-              size="small"
-              sx={{ color: "#00874f" }}
-              onClick={() => onToggleSave(post.id)}
-            >
-              {post.isSaved ? (
-                <Bookmark fontSize="small" />
-              ) : (
-                <BookmarkBorder fontSize="small" />
-              )}
-            </IconButton>
-
-            <IconButton
-              size="small"
-              sx={{ color: "#00874f" }}
-              onClick={() => onEdit(post)}
-            >
+            <IconButton size="small" sx={{ color: "#00874f" }} onClick={onEdit}>
               <Edit fontSize="small" />
             </IconButton>
           </Stack>
-
-          <IconButton
-            size="small"
-            sx={{ color: "#ef4444" }}
-            onClick={() => onDelete(post.id)}
-          >
+          <IconButton size="small" sx={{ color: "#ef4444" }} onClick={onDelete}>
             <DeleteOutline fontSize="small" />
           </IconButton>
         </Stack>
@@ -445,7 +536,7 @@ function PostCard({ post, onEdit, onDelete, onToggleSave }) {
   );
 }
 
-function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
+function PostModal({ open, post, onClose, onCreate, onUpdate }) {
   const isEdit = Boolean(post);
   const [formData, setFormData] = useState({
     title: "",
@@ -468,15 +559,29 @@ function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
     setError("");
   }, [open, post]);
 
+  useEffect(() => {
+    return () => {
+      previews.forEach((src) => {
+        if (src.startsWith("blob:")) {
+          URL.revokeObjectURL(src);
+        }
+      });
+    };
+  }, [previews]);
+
   const handleChange = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleImagesChange = (event) => {
     const files = Array.from(event.target.files || []);
+
+    previews.forEach((src) => {
+      if (src.startsWith("blob:")) {
+        URL.revokeObjectURL(src);
+      }
+    });
+
     handleChange("images", files);
     setPreviews(files.map((file) => URL.createObjectURL(file)));
   };
@@ -491,12 +596,9 @@ function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
       } else {
         await onCreate(formData);
       }
+      onClose();
     } catch (err) {
-      setError(
-        isEdit
-          ? "Could not update post. Please check the update endpoint."
-          : "Could not publish post. Please check the add post endpoint."
-      );
+      setError(err.message || (isEdit ? "Update failed" : "Creation failed"));
     } finally {
       setSaving(false);
     }
@@ -508,16 +610,11 @@ function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
       onClose={onClose}
       maxWidth="sm"
       fullWidth
-      PaperProps={{
-        sx: {
-          borderRadius: 3,
-          boxShadow: "0 24px 70px rgba(15, 23, 42, 0.25)",
-        },
-      }}
+      PaperProps={{ sx: { borderRadius: 3 } }}
       BackdropProps={{
         sx: {
           backdropFilter: "blur(5px)",
-          bgcolor: "rgba(248, 250, 252, 0.65)",
+          bgcolor: "rgba(248,250,252,0.65)",
         },
       }}
     >
@@ -574,9 +671,9 @@ function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
                 p: 1,
               }}
             >
-              {previews.map((src) => (
+              {previews.map((src, idx) => (
                 <Box
-                  key={src}
+                  key={`${src}-${idx}`}
                   component="img"
                   src={src}
                   alt=""
@@ -663,7 +760,7 @@ function AddPostModal({ open, post, onClose, onCreate, onUpdate }) {
             variant="contained"
             startIcon={<PlayArrow />}
             onClick={handleSubmit}
-            disabled={saving || !formData.title || !formData.content}
+            disabled={saving || !formData.title.trim() || !formData.content.trim()}
             sx={{
               borderRadius: 999,
               px: 3,

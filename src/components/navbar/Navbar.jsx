@@ -28,7 +28,7 @@ function Navbar() {
   const navLinks = [
     { text: "Home", path: "/" },  
     { text: "About Us", path: "/about" },
-     { text: "FAQ", path: "/faq" },
+    { text: "specialists", path: "/specialists" }
   ];
 
   return (

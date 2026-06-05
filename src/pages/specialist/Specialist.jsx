@@ -27,8 +27,9 @@ import {
   MenuItem,
   Alert,
   Snackbar,
+  IconButton,
 } from "@mui/material";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
@@ -41,11 +42,15 @@ import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import WarningIcon from "@mui/icons-material/Warning";
 import PaymentIcon from "@mui/icons-material/Payment";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 const GREEN = "#22c55e";
 const DARK_GREEN = "#15803d";
 
-const FEEDBACK_API = "https://nutrilife.runasp.net/api/FeedBack/AddFeddback";
+const FEEDBACK_BASE = "https://nutrilife.runasp.net/api/FeedBack";
+const FEEDBACK_GET_ALL = (nutritionistId) => `${FEEDBACK_BASE}/AllNutriFeddbacks/${nutritionistId}`;
+const FEEDBACK_ADD = `${FEEDBACK_BASE}/AddFeddback`;
+const FEEDBACK_DELETE = (feedbackId) => `${FEEDBACK_BASE}/DeleteFeddback/${feedbackId}`;
 
 const getSoftGreen = (theme) =>
   theme.palette.mode === "dark" ? "rgba(34, 197, 94, 0.14)" : "#e8f5e9";
@@ -201,6 +206,27 @@ export default function Specialist() {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  const getAuthToken = () => localStorage.getItem("token");
+
+  const isTokenValid = () => {
+    const token = getAuthToken();
+    if (!token) return false;
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      const exp = payload.exp;
+      if (exp && Date.now() >= exp * 1000) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("userId");
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const isLoggedIn = !!getAuthToken();
+
   const [spec, setSpec] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -223,21 +249,21 @@ export default function Specialist() {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [hasUserLeftFeedback, setHasUserLeftFeedback] = useState(false);
 
-  // New states for subscription flow
+  // حالة الحذف
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState({ text: "", type: "" });
+
   const [pendingSubscription, setPendingSubscription] = useState(null);
   const [pollingInterval, setPollingInterval] = useState(null);
   const [showPayButton, setShowPayButton] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "info" });
 
-  // Modal states
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [modalSubmitting, setModalSubmitting] = useState(false);
-
-  const getAuthToken = () => localStorage.getItem("token");
 
   const getCurrentUserId = () => {
     const userId = localStorage.getItem("userId");
@@ -265,25 +291,40 @@ export default function Specialist() {
 
   const specialistId = getSpecialistId(spec) || id;
 
-  // Helper to check if token is valid (not expired)
-  const isTokenValid = () => {
-    const token = getAuthToken();
-    if (!token) return false;
+  // --- دالة حذف التقييم ---
+  const handleDeleteFeedback = async (feedbackId) => {
+    const confirmDelete = window.confirm("Are you sure you want to delete this feedback? This action cannot be undone.");
+    if (!confirmDelete) return;
+
+    setDeleteLoading(true);
     try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      const exp = payload.exp;
-      if (exp && Date.now() >= exp * 1000) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("userId");
-        return false;
-      }
-      return true;
-    } catch {
-      return false;
+      const token = getAuthToken();
+      if (!token) throw new Error("You must be logged in");
+
+      await axios.delete(FEEDBACK_DELETE(feedbackId), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // تحديث القائمة محلياً
+      setFeedbacks(prev => prev.filter(fb => 
+        (fb.id ?? fb.feedbackId ?? fb.FeedBackId) !== feedbackId
+      ));
+
+      setDeleteMessage({ text: "Feedback deleted successfully!", type: "success" });
+      setTimeout(() => setDeleteMessage({ text: "", type: "" }), 3000);
+    } catch (err) {
+      console.error("Delete error:", err);
+      setDeleteMessage({
+        text: err.response?.status === 404 ? "Feedback not found" : "Failed to delete feedback. Please try again.",
+        type: "error",
+      });
+      setTimeout(() => setDeleteMessage({ text: "", type: "" }), 3000);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
-  // Check payment status on return
+  // باقي الـ state والـ Effects كما هي...
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const paymentStatus = urlParams.get('payment_status');
@@ -309,9 +350,9 @@ export default function Specialist() {
   useEffect(() => {
     setLoading(true);
     setError("");
-
+  
+    // 1. التحقق من وجود بيانات لأخصائي مسجل حديثًا
     const justRegistered = localStorage.getItem("justRegisteredSpecialist");
-
     if (justRegistered) {
       const specialistData = JSON.parse(justRegistered);
       setSpec(specialistData);
@@ -319,28 +360,35 @@ export default function Specialist() {
       setLoading(false);
       return;
     }
-
-    axios
-      .get("https://nutrilife.runasp.net/api/Account/allNutritionists")
-      .then((res) => {
-        const data = Array.isArray(res.data) ? res.data : [];
-        const found = data.find((item) => {
-          const foundId = getSpecialistId(item);
-          return String(foundId) === String(id);
-        });
-        if (found) setSpec(found);
-        else setError("Specialist not found");
+  
+    // 2. جلب بيانات الأخصائي مع إرسال التوكن إذا كان المستخدم مسجلاً
+    const fetchSpecialist = async () => {
+      try {
+        const token = getAuthToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const response = await axios.get(
+          `https://nutrilife.runasp.net/api/NutritionistPlans/GetNutri/${id}`,
+          { headers }
+        );
+        setSpec(response.data);
+      } catch (err) {
+        console.error("API Error:", err);
+        if (err.response?.status === 401) {
+          setError("You need to login to view specialist details.");
+        } else {
+          setError("Failed to load specialist data");
+        }
+      } finally {
         setLoading(false);
-      })
-      .catch(() => {
-        setError("Failed to load specialist data");
-        setLoading(false);
-      });
+      }
+    };
+  
+    fetchSpecialist();
   }, [id]);
-
+  
   useEffect(() => {
     const nutritionistIdForPlans = getSpecialistId(spec) || id;
-    if (!nutritionistIdForPlans) return;
+    if (!nutritionistIdForPlans || !isLoggedIn) return;
 
     const fetchPlans = async () => {
       setPlansLoading(true);
@@ -360,20 +408,18 @@ export default function Specialist() {
       }
     };
     fetchPlans();
-  }, [spec, id]);
+  }, [spec, id, isLoggedIn]);
 
   const fetchFeedbacks = async (nutritionistId) => {
     setFeedbackLoading(true);
     setFeedbackError("");
     try {
       const token = getAuthToken();
-      const res = await axios.get(
-        `${FEEDBACK_API}/GetNutriFeddBacks/${nutritionistId}`,
-        {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        }
-      );
-      setFeedbacks(getResponseArray(res.data));
+      const res = await axios.get(FEEDBACK_GET_ALL(nutritionistId), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = getResponseArray(res.data);
+      setFeedbacks(data);
     } catch (err) {
       console.error("Fetch feedbacks error:", err.response || err);
       setFeedbackError("Could not load feedbacks.");
@@ -403,30 +449,31 @@ export default function Specialist() {
     try {
       const response = await axios.get(
         `https://nutrilife.runasp.net/api/Subscription/clientHistory/${currentUserId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       const subscriptions = getResponseArray(response.data);
-      const activeSub = subscriptions.find((sub) => {
-        const subNutritionistId =
-          sub.nutritionistId ??
-          sub.NutritionistId ??
-          sub.nutritionistID ??
-          sub.nutritionist?.id ??
-          sub.Nutritionist?.Id;
+      const activeStatuses = ["approved", "active", "confirmed", "waitingpayment", "finished"];
+      const currentNutritionistName = spec?.fullName || spec?.FullName;
+
+      let activeSub = null;
+      for (const sub of subscriptions) {
         const status = String(sub.status ?? sub.Status ?? "").toLowerCase();
-        return (
-          String(subNutritionistId) === String(nutritionistId) &&
-          ["approved", "active", "confirmed"].includes(status)
-        );
-      });
+        if (sub.nutritionistName === currentNutritionistName && activeStatuses.includes(status)) {
+          activeSub = sub;
+          break;
+        }
+      }
+
       if (activeSub) {
-        setActiveSubscriptionId(getSubscriptionId(activeSub));
+        let subId = getSubscriptionId(activeSub);
+        if (subId === 0 || subId === "0") {
+          if (pendingSubscription && String(pendingSubscription.nutritionistId) === String(nutritionistId)) {
+            subId = pendingSubscription.id;
+          }
+        }
+        setActiveSubscriptionId(subId);
       } else {
-        setSubscriptionError(
-          "You don't have an active subscription with this nutritionist."
-        );
+        setSubscriptionError("You don't have an active subscription with this nutritionist.");
       }
     } catch (err) {
       console.error("Subscription verification error:", err.response || err);
@@ -438,33 +485,27 @@ export default function Specialist() {
 
   const startPollingSubscriptionStatus = (subscriptionId, firstNameVal, lastNameVal, planTitle) => {
     if (pollingInterval) clearInterval(pollingInterval);
-
     const interval = setInterval(async () => {
       const token = getAuthToken();
       if (!token || !currentUserId) return;
-
       try {
         const response = await axios.get(
           `https://nutrilife.runasp.net/api/Subscription/clientHistory/${currentUserId}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         const subscriptions = getResponseArray(response.data);
-        const foundSub = subscriptions.find(
-          (sub) => String(getSubscriptionId(sub)) === String(subscriptionId)
-        );
-
+        const foundSub = subscriptions.find((sub) => String(getSubscriptionId(sub)) === String(subscriptionId));
         if (foundSub) {
           const status = String(foundSub.status ?? foundSub.Status ?? "").toLowerCase();
-          
-          if (status === "approved" || status === "active" || status === "confirmed") {
+          const paymentAllowedStatuses = ["approved", "active", "confirmed", "waitingpayment", "finished"];
+          if (paymentAllowedStatuses.includes(status)) {
             setShowPayButton(true);
             setPendingSubscription({
               id: subscriptionId,
               firstName: firstNameVal,
               lastName: lastNameVal,
               planTitle: planTitle,
+              nutritionistId: specialistId,
             });
             setSnackbar({
               open: true,
@@ -489,7 +530,6 @@ export default function Specialist() {
         console.error("Polling error:", err);
       }
     }, 5000);
-
     setPollingInterval(interval);
   };
 
@@ -499,7 +539,6 @@ export default function Specialist() {
     };
   }, [pollingInterval]);
 
-  // Request subscription (only creation, no payment yet)
   const handleRequestSubscription = async () => {
     if (!firstName.trim() || !lastName.trim() || !paymentMethod) {
       setSnackbar({ open: true, message: "Please fill all fields and select payment method.", severity: "error" });
@@ -509,38 +548,25 @@ export default function Specialist() {
       setSnackbar({ open: true, message: "No plan selected.", severity: "error" });
       return;
     }
-
     const planId = getPlanId(selectedPlan);
     if (!planId) {
       setSnackbar({ open: true, message: "Plan ID not found.", severity: "error" });
       return;
     }
-
-    // Validate token before proceeding
     if (!isTokenValid()) {
       setSnackbar({ open: true, message: "Your session has expired. Please login again.", severity: "warning" });
       navigate("/login");
       return;
     }
-
     const token = getAuthToken();
     if (!token) {
       setSnackbar({ open: true, message: "Please login first.", severity: "warning" });
       navigate("/login");
       return;
     }
-
     setModalSubmitting(true);
     setRequestingPlanId(planId);
-
     try {
-      console.log("Sending subscription request with payload:", {
-        NutritionistId: specialistId,
-        UserPlan: Number(planId),
-        notes: `Payment method: ${paymentMethod}, Name: ${firstName} ${lastName}`,
-      });
-      console.log("Using token:", token ? `${token.substring(0, 20)}...` : "No token");
-
       const subscriptionRes = await axios.post(
         "https://nutrilife.runasp.net/api/Subscription",
         {
@@ -548,71 +574,31 @@ export default function Specialist() {
           UserPlan: Number(planId),
           notes: `Payment method: ${paymentMethod}, Name: ${firstName} ${lastName}`,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
+        { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
       );
-
-      console.log("Subscription response:", subscriptionRes.data);
-
-      const newSubscriptionId =
-        subscriptionRes.data?.subscriptionId ??
-        subscriptionRes.data?.SubscriptionId ??
-        subscriptionRes.data?.id;
-      
-      if (!newSubscriptionId) {
-        throw new Error("No subscription ID returned from server.");
-      }
-
+      const newSubscriptionId = subscriptionRes.data?.subscriptionId ?? subscriptionRes.data?.SubscriptionId ?? subscriptionRes.data?.id;
+      if (!newSubscriptionId) throw new Error("No subscription ID returned from server.");
       setPendingSubscription({
         id: newSubscriptionId,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         planTitle: selectedPlan.title ?? selectedPlan.Title ?? "Subscription Plan",
+        nutritionistId: specialistId,
       });
-      
-      startPollingSubscriptionStatus(
-        newSubscriptionId,
-        firstName.trim(),
-        lastName.trim(),
-        selectedPlan.title ?? selectedPlan.Title ?? "Subscription Plan"
-      );
-
-      setSnackbar({
-        open: true,
-        message: "Subscription request sent! Waiting for nutritionist approval...",
-        severity: "info",
-      });
-      
+      startPollingSubscriptionStatus(newSubscriptionId, firstName.trim(), lastName.trim(), selectedPlan.title ?? selectedPlan.Title ?? "Subscription Plan");
+      setSnackbar({ open: true, message: "Subscription request sent! Waiting for nutritionist approval...", severity: "info" });
       setModalOpen(false);
       setSelectedPlan(null);
       setFirstName("");
       setLastName("");
       setPaymentMethod("");
-      
     } catch (err) {
       console.error("Subscription creation error:", err.response || err);
-      
-      // Handle 403 specifically
       if (err.response?.status === 403) {
-        setSnackbar({
-          open: true,
-          message: "You don't have permission to subscribe. Make sure you are logged in as a client and your account is active.",
-          severity: "error",
-        });
-        // Optionally redirect to login if token might be invalid
-        if (!isTokenValid()) {
-          setTimeout(() => navigate("/login"), 3000);
-        }
+        setSnackbar({ open: true, message: "You don't have permission to subscribe. Make sure you are logged in as a client.", severity: "error" });
+        if (!isTokenValid()) setTimeout(() => navigate("/login"), 3000);
       } else {
-        const errorMsg =
-          err.response?.data?.message ||
-          err.response?.data?.title ||
-          err.response?.data ||
-          "Failed to create subscription. Please try again.";
+        const errorMsg = err.response?.data?.message || err.response?.data?.title || err.response?.data || "Failed to create subscription. Please try again.";
         setSnackbar({ open: true, message: errorMsg, severity: "error" });
       }
     } finally {
@@ -622,28 +608,18 @@ export default function Specialist() {
   };
 
   const handlePayNow = async () => {
-    if (!pendingSubscription) {
-      setSnackbar({ open: true, message: "No pending subscription found.", severity: "error" });
+    if (!pendingSubscription || !pendingSubscription.id) {
+      setSnackbar({ open: true, message: "No pending payment found.", severity: "error" });
       return;
     }
-
-    if (!isTokenValid()) {
-      setSnackbar({ open: true, message: "Your session has expired. Please login again.", severity: "warning" });
-      navigate("/login");
-      return;
-    }
-
     const token = getAuthToken();
-    if (!token) {
-      setSnackbar({ open: true, message: "Please login first.", severity: "error" });
+    if (!token || !isTokenValid()) {
+      setSnackbar({ open: true, message: "Please login first.", severity: "warning" });
       navigate("/login");
       return;
     }
-
     setModalSubmitting(true);
     try {
-      console.log("Initiating payment for subscription:", pendingSubscription.id);
-      
       const paymentRes = await axios.post(
         "https://nutrilife.runasp.net/api/Payment",
         {
@@ -651,44 +627,58 @@ export default function Specialist() {
           FirstName: pendingSubscription.firstName,
           LastName: pendingSubscription.lastName,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
+        { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
       );
-
-      console.log("Payment response:", paymentRes.data);
-
-      const paymentUrl = paymentRes.data?.paymentUrl ?? 
-                         paymentRes.data?.redirectUrl ?? 
-                         paymentRes.data?.url ?? 
-                         paymentRes.data?.paymentLink;
-      
-      if (!paymentUrl) {
-        console.error("Payment response missing URL:", paymentRes.data);
-        throw new Error("Payment URL not returned from server.");
+      const responseData = paymentRes.data;
+      let paymentUrl = null;
+      if (typeof responseData === "string") paymentUrl = responseData;
+      else if (typeof responseData === "object" && responseData !== null) {
+        const possibleKeys = ["paymentUrl", "paymentURL", "PaymentUrl", "PaymentURL", "redirectUrl", "redirectURL", "RedirectUrl", "RedirectURL", "url", "URL", "Url", "paymentLink", "paymentLinkUrl", "PaymentLink", "link", "Link", "checkoutUrl", "checkout_url", "CheckoutUrl", "data", "result", "response"];
+        for (let key of possibleKeys) {
+          const value = responseData[key];
+          if (typeof value === "string" && (value.startsWith("http") || value.includes("://"))) {
+            paymentUrl = value;
+            break;
+          }
+        }
+        if (!paymentUrl) {
+          const nestedSearch = (obj, depth = 0) => {
+            if (depth > 3) return null;
+            for (let k in obj) {
+              const v = obj[k];
+              if (typeof v === "string" && (v.startsWith("http") || v.includes("://"))) return v;
+              if (typeof v === "object" && v !== null) {
+                const found = nestedSearch(v, depth + 1);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          paymentUrl = nestedSearch(responseData);
+        }
+        if (!paymentUrl) {
+          const stringified = JSON.stringify(responseData);
+          const match = stringified.match(/https?:\/\/[^\s"']+/);
+          if (match) paymentUrl = match[0];
+        }
       }
-
-      window.location.href = paymentUrl;
-      
+      if (paymentUrl) {
+        window.location.href = paymentUrl;
+        return;
+      }
+      console.error("No payment URL found. Full response:", responseData);
+      alert("لم يتم العثور على رابط الدفع في استجابة الخادم.\n\nيرجى نسخ هذه البيانات وإرسالها للدعم:\n" + JSON.stringify(responseData, null, 2));
+      setSnackbar({ open: true, message: "لم يتم العثور على رابط الدفع. تحقق من وحدة التحكم لمزيد من التفاصيل.", severity: "error" });
     } catch (err) {
       console.error("Payment error:", err.response || err);
       if (err.response?.status === 403) {
-        setSnackbar({
-          open: true,
-          message: "Payment permission denied. Please login again.",
-          severity: "error",
-        });
+        setSnackbar({ open: true, message: "⚠️ صلاحية الدفع مرفوضة. يرجى تسجيل الدخول مرة أخرى.", severity: "error" });
         navigate("/login");
       } else {
-        const errorMsg =
-          err.response?.data?.message ||
-          err.response?.data?.title ||
-          "Payment initialization failed. Please try again.";
+        const errorMsg = err.response?.data?.message || err.response?.data?.title || "فشل بدء عملية الدفع. يرجى المحاولة مرة أخرى.";
         setSnackbar({ open: true, message: errorMsg, severity: "error" });
       }
+    } finally {
       setModalSubmitting(false);
     }
   };
@@ -712,76 +702,35 @@ export default function Specialist() {
 
   const handleSubmitFeedback = async () => {
     if (!newContent.trim() || !newRate) {
-      setSubmitMessage({
-        text: "Please write a feedback and provide a rating.",
-        type: "error",
-      });
+      setSubmitMessage({ text: "Please write a feedback and provide a rating.", type: "error" });
       return;
     }
-
     if (hasUserLeftFeedback) {
-      setSubmitMessage({
-        text: "You have already left feedback for this nutritionist.",
-        type: "error",
-      });
+      setSubmitMessage({ text: "You have already left feedback for this nutritionist.", type: "error" });
       return;
     }
-
     if (!activeSubscriptionId) {
-      setSubmitMessage({
-        text: "No active subscription found. You cannot leave feedback.",
-        type: "error",
-      });
+      setSubmitMessage({ text: "No active subscription found. You cannot leave feedback.", type: "error" });
       return;
     }
-
     const token = getAuthToken();
     if (!token) {
-      setSubmitMessage({
-        text: "You are not logged in. Please log in to submit feedback.",
-        type: "error",
-      });
+      setSubmitMessage({ text: "You are not logged in. Please log in to submit feedback.", type: "error" });
       return;
     }
-
     setSubmitLoading(true);
     setSubmitMessage({ text: "", type: "" });
-
     try {
-      await axios.post(
-        `${FEEDBACK_API}/AddFeddback`,
-        {
-          subscriptionId: activeSubscriptionId,
-          content: newContent.trim(),
-          rate: newRate,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      setSubmitMessage({
-        text: "Feedback submitted successfully!",
-        type: "success",
-      });
+      await axios.post(FEEDBACK_ADD, { subscriptionId: activeSubscriptionId, content: newContent.trim(), rate: newRate }, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
+      setSubmitMessage({ text: "Feedback submitted successfully!", type: "success" });
       setNewContent("");
       setNewRate(0);
       setHasUserLeftFeedback(true);
-      if (specialistId) {
-        await fetchFeedbacks(specialistId);
-      }
+      if (specialistId) await fetchFeedbacks(specialistId);
     } catch (err) {
       console.error("Submit feedback error:", err.response || err);
-      setSubmitMessage({
-        text:
-          err.response?.status === 400
-            ? "You may have already submitted feedback."
-            : "Failed to submit feedback.",
-        type: "error",
-      });
+      if (err.response?.status === 400) setSubmitMessage({ text: "You may have already submitted feedback for this subscription.", type: "error" });
+      else setSubmitMessage({ text: "Failed to submit feedback. Please try again.", type: "error" });
     } finally {
       setSubmitLoading(false);
     }
@@ -792,32 +741,21 @@ export default function Specialist() {
   }, [specialistId]);
 
   useEffect(() => {
-    if (specialistId && currentUserId) fetchActiveSubscription(specialistId);
-  }, [specialistId, currentUserId]);
+    if (specialistId && currentUserId && spec) fetchActiveSubscription(specialistId);
+  }, [specialistId, currentUserId, spec]);
 
   useEffect(() => {
     if (!activeSubscriptionId) {
       setHasUserLeftFeedback(false);
       return;
     }
-    const alreadyLeft = feedbacks.some((fb) => {
-      const feedbackSubscriptionId = getFeedbackSubscriptionId(fb);
-      return String(feedbackSubscriptionId) === String(activeSubscriptionId);
-    });
+    const alreadyLeft = feedbacks.some((fb) => String(getFeedbackSubscriptionId(fb)) === String(activeSubscriptionId));
     setHasUserLeftFeedback(alreadyLeft);
   }, [feedbacks, activeSubscriptionId]);
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          bgcolor: "background.default",
-          minHeight: "60vh",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
+      <Box sx={{ bgcolor: "background.default", minHeight: "60vh", display: "flex", justifyContent: "center", alignItems: "center" }}>
         <CircularProgress sx={{ color: GREEN }} />
       </Box>
     );
@@ -826,23 +764,14 @@ export default function Specialist() {
   if (error || !spec) {
     return (
       <Container sx={{ py: 8, textAlign: "center" }}>
-        <Typography color={error ? "error" : "text.primary"}>
-          {error || "Specialist not found"}
-        </Typography>
-        <Button
-          variant="contained"
-          onClick={() => navigate("/specialists")}
-          sx={{ mt: 2, bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}
-        >
-          Back
-        </Button>
+        <Typography color={error ? "error" : "text.primary"}>{error || "Specialist not found"}</Typography>
+        <Button variant="contained" onClick={() => navigate("/specialists")} sx={{ mt: 2, bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}>Back</Button>
       </Container>
     );
   }
 
   const fullName = spec.fullName || spec.FullName;
-  const specialization =
-    spec.specialization || spec.Specialization || "Nutrition Specialist";
+  const specialization = spec.specialization || spec.Specialization || "Nutrition Specialist";
   const location = spec.location || spec.Location;
   const languages = getArrayValue(spec.languages || spec.Languages);
   const email = spec.email || spec.Email;
@@ -850,236 +779,105 @@ export default function Specialist() {
   const experience = spec.yearsOfExperience || spec.YearsOfExperience;
   const bio = spec.bio || spec.Bio;
   const expertIn = getArrayValue(spec.expertIn || spec.ExpertIn);
-  const certifications = getArrayValue(
-    spec.certifications || spec.Certifications
-  );
-  const workingTime =
-    spec.WorkingTime ||
-    spec.workingTime ||
-    spec.oppeningTime ||
-    spec.OppeningTime;
+  const certifications = getArrayValue(spec.certifications || spec.Certifications);
+  const workingTime = spec.WorkingTime || spec.workingTime || spec.oppeningTime || spec.OppeningTime;
 
   return (
-    <Box
-      dir="ltr"
-      sx={{
-        bgcolor: "background.default",
-        color: "text.primary",
-        minHeight: "100vh",
-        py: 5,
-        textAlign: "left",
-      }}
-    >
-      <Container
-        maxWidth={false}
-        disableGutters
-        sx={{
-          px: { xs: 2, md: 5 },
-          mx: 0,
-        }}
-      >
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => navigate("/specialists")}
-          sx={{
-            mb: 3,
-            color: "primary.main",
-            "&:hover": { bgcolor: getSoftGreen },
-          }}
-        >
-          Back to Specialists
-        </Button>
-
+    <Box dir="ltr" sx={{ bgcolor: "background.default", color: "text.primary", minHeight: "100vh", py: 5, textAlign: "left" }}>
+      <Container maxWidth={false} disableGutters sx={{ px: { xs: 2, md: 5 }, mx: 0 }}>
+        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate("/specialists")} sx={{ mb: 3, color: "primary.main", "&:hover": { bgcolor: getSoftGreen } }}>Back to Specialists</Button>
         {showPayButton && pendingSubscription && (
-          <Alert
-            severity="success"
-            sx={{ mb: 3 }}
-            action={
-              <Button
-                color="inherit"
-                size="small"
-                startIcon={<PaymentIcon />}
-                onClick={handlePayNow}
-                disabled={modalSubmitting}
-                sx={{ fontWeight: "bold" }}
-              >
-                {modalSubmitting ? <CircularProgress size={20} /> : "Pay Now"}
-              </Button>
-            }
-          >
+          <Alert severity="success" sx={{ mb: 3 }} action={<Button color="inherit" size="small" startIcon={<PaymentIcon />} onClick={handlePayNow} disabled={modalSubmitting} sx={{ fontWeight: "bold" }}>{modalSubmitting ? <CircularProgress size={20} /> : "Pay Now"}</Button>}>
             Your subscription for "{pendingSubscription.planTitle}" has been approved! Click Pay Now to complete payment.
           </Alert>
         )}
-
         <Grid container spacing={3} sx={{ direction: "ltr" }}>
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card
-              sx={{
-                ...themedCardSx,
-                p: 3,
-                borderRadius: 3,
-                position: "sticky",
-                top: 20,
-                boxShadow: 2,
-              }}
-            >
+            <Card sx={{ ...themedCardSx, p: 3, borderRadius: 3, position: "sticky", top: 20, boxShadow: 2 }}>
               <Box sx={{ textAlign: "center", mb: 2 }}>
-                <Avatar
-                  sx={{
-                    width: 90,
-                    height: 90,
-                    margin: "auto",
-                    mb: 1.5,
-                    bgcolor: GREEN,
-                    fontSize: 36,
-                    fontWeight: 800,
-                  }}
-                >
-                  {fullName?.charAt(0) || "?"}
-                </Avatar>
-                <Typography variant="h6" fontWeight={800}>
-                  {fullName}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {specialization}
-                </Typography>
+                <Avatar sx={{ width: 90, height: 90, margin: "auto", mb: 1.5, bgcolor: GREEN, fontSize: 36, fontWeight: 800 }}>{fullName?.charAt(0) || "?"}</Avatar>
+                <Typography variant="h6" fontWeight={800}>{fullName}</Typography>
+                <Typography variant="body2" color="text.secondary">{specialization}</Typography>
               </Box>
               <Divider sx={{ mb: 2 }} />
               {[
                 ["Location", location, <LocationOnIcon sx={{ color: GREEN }} />],
-                [
-                  "Working Hours",
-                  workingTime,
-                  <AccessTimeIcon sx={{ color: GREEN }} />,
-                ],
-                [
-                  "Languages",
-                  languages.length > 0 ? languages.join(", ") : null,
-                  <TranslateIcon sx={{ color: GREEN }} />,
-                ],
+                ["Working Hours", workingTime, <AccessTimeIcon sx={{ color: GREEN }} />],
+                ["Languages", languages.length > 0 ? languages.join(", ") : null, <TranslateIcon sx={{ color: GREEN }} />],
                 ["Email", email, <EmailIcon sx={{ color: GREEN }} />],
                 ["Phone", phone, <PhoneIcon sx={{ color: GREEN }} />],
-                [
-                  "Experience",
-                  experience ? `${experience} years` : null,
-                  <StarIcon sx={{ color: GREEN }} />,
-                ],
+                ["Experience", experience ? `${experience} years` : null, <StarIcon sx={{ color: GREEN }} />],
               ].map(([label, value, icon]) => (
                 <Box key={label} sx={{ display: "flex", gap: 1.5, mb: 1.5 }}>
                   {icon}
                   <Box>
-                    <Typography variant="caption" fontWeight={600}>
-                      {label}
-                    </Typography>
-                    <Typography variant="body2">
-                      {value || <NotAvailable />}
-                    </Typography>
+                    <Typography variant="caption" fontWeight={600}>{label}</Typography>
+                    <Typography variant="body2">{value || <NotAvailable />}</Typography>
                   </Box>
                 </Box>
               ))}
-              <Button
-                variant="contained"
-                fullWidth
-                sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}
-              >
-                Send Message
-              </Button>
+              <Button variant="contained" fullWidth sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}>Send Message</Button>
             </Card>
           </Grid>
-
           <Grid size={{ xs: 12, md: 8 }}>
+            {/* Biography */}
             <Card sx={{ ...themedCardSx, mb: 3 }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800}>
-                  Professional Biography
-                </Typography>
-                <Typography color="text.secondary">
-                  {bio || <NotAvailable message="No bio provided yet" />}
-                </Typography>
+                <Typography variant="h6" fontWeight={800}>Professional Biography</Typography>
+                <Typography color="text.secondary">{bio || <NotAvailable message="No bio provided yet" />}</Typography>
               </CardContent>
             </Card>
-
+            {/* Areas of Expertise */}
             <Card sx={{ ...themedCardSx, mb: 3 }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800}>
-                  Areas of Expertise
-                </Typography>
+                <Typography variant="h6" fontWeight={800}>Areas of Expertise</Typography>
                 {expertIn.length > 0 ? (
                   <Grid container spacing={2}>
                     {expertIn.map((area, i) => (
                       <Grid size={{ xs: 6, sm: 3 }} key={i}>
-                        <Box
-                          sx={{
-                            textAlign: "center",
-                            p: 2,
-                            border: "1px solid",
-                            borderColor: "divider",
-                            borderRadius: 2,
-                            bgcolor: "background.default",
-                          }}
-                        >
+                        <Box sx={{ textAlign: "center", p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2, bgcolor: "background.default" }}>
                           <StarIcon sx={{ color: GREEN }} />
-                          <Typography variant="body2" fontWeight={600}>
-                            {area}
-                          </Typography>
+                          <Typography variant="body2" fontWeight={600}>{area}</Typography>
                         </Box>
                       </Grid>
                     ))}
                   </Grid>
-                ) : (
-                  <NotAvailable message="No expertise areas added" />
-                )}
+                ) : <NotAvailable message="No expertise areas added" />}
               </CardContent>
             </Card>
-
+            {/* Certifications */}
             <Card sx={{ ...themedCardSx, mb: 3 }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800}>
-                  Certifications
-                </Typography>
+                <Typography variant="h6" fontWeight={800}>Certifications</Typography>
                 {certifications.length > 0 ? (
                   <Stack spacing={1.2}>
                     {certifications.map((cert, i) => (
                       <Box key={i} sx={{ display: "flex", gap: 1.5 }}>
-                        <FiberManualRecordIcon
-                          sx={{ color: GREEN, fontSize: 10 }}
-                        />
+                        <FiberManualRecordIcon sx={{ color: GREEN, fontSize: 10 }} />
                         <Typography variant="body2">{cert}</Typography>
                       </Box>
                     ))}
                   </Stack>
-                ) : (
-                  <NotAvailable message="No certifications added" />
-                )}
+                ) : <NotAvailable message="No certifications added" />}
               </CardContent>
             </Card>
-
+            {/* Plans */}
             <Card sx={{ ...themedCardSx, mb: 3 }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} mb={2}>
-                  Pricing & Plans
-                </Typography>
-                {plansLoading ? (
-                  <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-                    <CircularProgress sx={{ color: GREEN }} />
-                  </Box>
+                <Typography variant="h6" fontWeight={800} mb={2}>Pricing & Plans</Typography>
+                {!isLoggedIn ? (
+                  <Alert severity="info" sx={{ mt: 1 }}>Please <Link to="/login" style={{ textDecoration: 'none', fontWeight: 'bold' }}>login</Link> to view subscription plans and pricing.</Alert>
+                ) : plansLoading ? (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}><CircularProgress sx={{ color: GREEN }} /></Box>
                 ) : plans.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    No plans available at the moment.
-                  </Typography>
+                  <Typography variant="body2" color="text.secondary">No plans available at the moment.</Typography>
                 ) : (
                   <Grid container spacing={2}>
                     {plans.map((plan, index) => {
                       const planId = getPlanId(plan);
                       return (
                         <Grid key={planId ?? index} size={{ xs: 12, sm: 6, md: 4 }}>
-                          <PlanCard
-                            plan={plan}
-                            onSubscribe={handleSubscribe}
-                            subscribing={
-                              String(requestingPlanId) === String(planId)
-                            }
-                          />
+                          <PlanCard plan={plan} onSubscribe={handleSubscribe} subscribing={String(requestingPlanId) === String(planId)} />
                         </Grid>
                       );
                     })}
@@ -1087,207 +885,91 @@ export default function Specialist() {
                 )}
               </CardContent>
             </Card>
-
+            {/* Feedbacks */}
             <Card sx={{ ...themedCardSx, mb: 3 }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} mb={2}>
-                  Client Feedbacks
-                </Typography>
-                {feedbackLoading && (
-                  <CircularProgress size={24} sx={{ color: GREEN }} />
-                )}
-                {feedbackError && (
-                  <Typography color="error">{feedbackError}</Typography>
-                )}
+                <Typography variant="h6" fontWeight={800} mb={2}>Client Feedbacks</Typography>
+                {feedbackLoading && <CircularProgress size={24} sx={{ color: GREEN }} />}
+                {feedbackError && <Typography color="error">{feedbackError}</Typography>}
                 {!feedbackLoading && feedbacks.length === 0 && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    No feedbacks yet. Be the first to leave a review!
-                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>No feedbacks yet. Be the first to leave a review!</Typography>
                 )}
-                <List disablePadding>
-                  {feedbacks.map((fb, index) => (
-                    <ListItem
-                      key={
-                        fb.id ??
-                        fb.feedbackId ??
-                        fb.FeedBackId ??
-                        fb.subscriptionId ??
-                        index
-                      }
-                      disablePadding
-                      sx={{ display: "block", mb: 2 }}
-                    >
-                      <Box
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          mb: 0.5,
-                        }}
-                      >
-                        <Rating
-                          value={fb.rate ?? fb.Rate ?? 0}
-                          readOnly
-                          size="small"
-                          sx={{ color: GREEN }}
-                        />
-                        <Typography variant="caption">
-                          {(fb.userName || fb.UserName) &&
-                            `- ${fb.userName || fb.UserName}`}
-                        </Typography>
-                      </Box>
-                      <Typography variant="body2">
-                        {fb.content || fb.Content}
-                      </Typography>
-                      <Divider sx={{ mt: 1 }} />
-                    </ListItem>
-                  ))}
-                </List>
+              <List disablePadding>
+  {feedbacks.map((fb, index) => {
+    const feedbackId = fb.id ?? fb.feedbackId ?? fb.FeedBackId;
+    // ✅ حل مؤقت: إظهار زر الحذف لأي مستخدم مسجل دخول
+    const isOwn = !!getAuthToken(); 
+    
+    return (
+      <ListItem key={feedbackId ?? index} disablePadding sx={{ display: "block", mb: 2 }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <Box sx={{ flex: 1 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+              <Rating value={fb.rate ?? fb.Rate ?? 0} readOnly size="small" sx={{ color: GREEN }} />
+              <Typography variant="caption">
+                {/* يمكن إظهار اسم المستخدم إذا وُجد، وإلا يظهر "Anonymous" */}
+                {(fb.userName || fb.UserName) ? `- ${fb.userName || fb.UserName}` : '- Anonymous'}
+              </Typography>
+            </Box>
+            <Typography variant="body2">{fb.content || fb.Content}</Typography>
+          </Box>
+          {isOwn && (
+            <IconButton 
+              onClick={() => handleDeleteFeedback(feedbackId)} 
+              disabled={deleteLoading}
+              size="small" 
+              sx={{ color: "error.main", ml: 1 }}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          )}
+        </Box>
+        <Divider sx={{ mt: 1 }} />
+      </ListItem>
+    );
+  })}
+</List>
+                {deleteMessage.text && (
+                  <Alert severity={deleteMessage.type} sx={{ mt: 2 }}>{deleteMessage.text}</Alert>
+                )}
                 <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle1" fontWeight={700} mb={1}>
-                  Leave Your Feedback
-                </Typography>
+                <Typography variant="subtitle1" fontWeight={700} mb={1}>Leave Your Feedback</Typography>
                 {loadingSubscription && (
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <CircularProgress size={20} sx={{ color: GREEN }} />
-                    <Typography>Checking subscription...</Typography>
-                  </Box>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={20} sx={{ color: GREEN }} /><Typography>Checking subscription...</Typography></Box>
                 )}
                 {subscriptionError && !loadingSubscription && (
-                  <Box sx={{ mb: 2, p: 2, bgcolor: getSoftRed, borderRadius: 2 }}>
-                    <Typography variant="body2" color="error">
-                      {subscriptionError}
-                    </Typography>
-                  </Box>
+                  <Box sx={{ mb: 2, p: 2, bgcolor: getSoftRed, borderRadius: 2 }}><Typography variant="body2" color="error">{subscriptionError}</Typography></Box>
                 )}
-                {activeSubscriptionId &&
-                  !loadingSubscription &&
-                  !hasUserLeftFeedback && (
-                    <Box
-                      sx={{
-                        mb: 2,
-                        p: 2,
-                        bgcolor: getSoftGreen,
-                        borderRadius: 2,
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ color: GREEN }}>
-                        You have an active subscription. You can leave feedback.
-                      </Typography>
-                    </Box>
-                  )}
+                {activeSubscriptionId && !loadingSubscription && !hasUserLeftFeedback && (
+                  <Box sx={{ mb: 2, p: 2, bgcolor: getSoftGreen, borderRadius: 2 }}><Typography variant="body2" sx={{ color: GREEN }}>You have an active subscription. You can leave feedback.</Typography></Box>
+                )}
                 {hasUserLeftFeedback && (
-                  <Box
-                    sx={{
-                      mb: 2,
-                      p: 2,
-                      bgcolor: getSoftGreen,
-                      borderRadius: 2,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1,
-                    }}
-                  >
-                    <CheckCircleIcon sx={{ color: GREEN }} />
-                    <Typography variant="body2" sx={{ color: GREEN }}>
-                      You have already shared your feedback. Thank you!
-                    </Typography>
+                  <Box sx={{ mb: 2, p: 2, bgcolor: getSoftGreen, borderRadius: 2, display: "flex", alignItems: "center", gap: 1 }}>
+                    <CheckCircleIcon sx={{ color: GREEN }} /><Typography variant="body2" sx={{ color: GREEN }}>You have already shared your feedback. Thank you!</Typography>
                   </Box>
                 )}
                 <Box component="form" sx={{ mt: 1 }}>
-                  <TextField
-                    fullWidth
-                    label="Your feedback"
-                    multiline
-                    rows={2}
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
-                    disabled={
-                      !activeSubscriptionId ||
-                      hasUserLeftFeedback ||
-                      submitLoading ||
-                      loadingSubscription
-                    }
-                    sx={{ mb: 2 }}
-                  />
+                  <TextField fullWidth label="Your feedback" multiline rows={2} value={newContent} onChange={(e) => setNewContent(e.target.value)} disabled={!activeSubscriptionId || hasUserLeftFeedback || submitLoading || loadingSubscription} sx={{ mb: 2 }} />
                   <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
                     <Typography>Rating:</Typography>
-                    <Rating
-                      value={newRate}
-                      onChange={(e, val) => setNewRate(val || 0)}
-                      disabled={
-                        !activeSubscriptionId ||
-                        hasUserLeftFeedback ||
-                        submitLoading ||
-                        loadingSubscription
-                      }
-                      sx={{ color: GREEN }}
-                    />
+                    <Rating value={newRate} onChange={(e, val) => setNewRate(val || 0)} disabled={!activeSubscriptionId || hasUserLeftFeedback || submitLoading || loadingSubscription} sx={{ color: GREEN }} />
                   </Box>
-                  <Button
-                    variant="contained"
-                    disabled={
-                      !activeSubscriptionId ||
-                      hasUserLeftFeedback ||
-                      submitLoading ||
-                      loadingSubscription ||
-                      !newContent.trim() ||
-                      !newRate
-                    }
-                    onClick={handleSubmitFeedback}
-                    sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}
-                  >
-                    {submitLoading ? (
-                      <CircularProgress size={24} sx={{ color: "#fff" }} />
-                    ) : (
-                      "Submit Feedback"
-                    )}
+                  <Button variant="contained" disabled={!activeSubscriptionId || hasUserLeftFeedback || submitLoading || loadingSubscription || !newContent.trim() || !newRate} onClick={handleSubmitFeedback} sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}>
+                    {submitLoading ? <CircularProgress size={24} sx={{ color: "#fff" }} /> : "Submit Feedback"}
                   </Button>
                   {submitMessage.text && (
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        display: "block",
-                        mt: 1,
-                        color:
-                          submitMessage.type === "success"
-                            ? GREEN
-                            : "error.main",
-                        bgcolor:
-                          submitMessage.type === "success"
-                            ? getSoftGreen
-                            : "transparent",
-                        p: 1,
-                        borderRadius: 1,
-                      }}
-                    >
-                      {submitMessage.text}
-                    </Typography>
+                    <Typography variant="caption" sx={{ display: "block", mt: 1, color: submitMessage.type === "success" ? GREEN : "error.main", bgcolor: submitMessage.type === "success" ? getSoftGreen : "transparent", p: 1, borderRadius: 1 }}>{submitMessage.text}</Typography>
                   )}
                 </Box>
               </CardContent>
             </Card>
-
             {location && (
               <Card sx={themedCardSx}>
                 <CardContent>
-                  <Typography variant="h6" fontWeight={800}>
-                    Office Location
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" mb={2}>
-                    {location}
-                  </Typography>
+                  <Typography variant="h6" fontWeight={800}>Office Location</Typography>
+                  <Typography variant="body2" color="text.secondary" mb={2}>{location}</Typography>
                   <Box sx={{ height: 200, borderRadius: 2, overflow: "hidden" }}>
-                    <iframe
-                      title="map"
-                      width="100%"
-                      height="100%"
-                      style={{ border: 0 }}
-                      loading="lazy"
-                      src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                        location
-                      )}&output=embed`}
-                    />
+                    <iframe title="map" width="100%" height="100%" style={{ border: 0 }} loading="lazy" src={`https://maps.google.com/maps?q=${encodeURIComponent(location)}&output=embed`} />
                   </Box>
                 </CardContent>
               </Card>
@@ -1295,83 +977,30 @@ export default function Specialist() {
           </Grid>
         </Grid>
       </Container>
-
-      {/* Subscription Request Modal */}
+      {/* Subscription Modal */}
       <Dialog open={modalOpen} onClose={() => setModalOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Request Subscription</DialogTitle>
         <DialogContent>
-          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-            Plan: {selectedPlan?.title ?? selectedPlan?.Title ?? "Subscription Plan"}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Price: ${selectedPlan?.price ?? selectedPlan?.Price ?? 0}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>
-            After requesting, the nutritionist will review and approve your subscription. You will then be able to complete payment.
-          </Typography>
-          <TextField
-            fullWidth
-            margin="normal"
-            label="First Name"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            disabled={modalSubmitting}
-            required
-          />
-          <TextField
-            fullWidth
-            margin="normal"
-            label="Last Name"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            disabled={modalSubmitting}
-            required
-          />
+          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Plan: {selectedPlan?.title ?? selectedPlan?.Title ?? "Subscription Plan"}</Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom>Price: ${selectedPlan?.price ?? selectedPlan?.Price ?? 0}</Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 2 }}>After requesting, the nutritionist will review and approve your subscription. You will then be able to complete payment.</Typography>
+          <TextField fullWidth margin="normal" label="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} disabled={modalSubmitting} required />
+          <TextField fullWidth margin="normal" label="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} disabled={modalSubmitting} required />
           <FormControl fullWidth margin="normal">
             <InputLabel>Payment Method</InputLabel>
-            <Select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              disabled={modalSubmitting}
-            >
+            <Select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} disabled={modalSubmitting}>
               <MenuItem value="Card">Card</MenuItem>
               <MenuItem value="Cash">Cash</MenuItem>
             </Select>
           </FormControl>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setModalOpen(false)} disabled={modalSubmitting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleRequestSubscription}
-            variant="contained"
-            disabled={
-              modalSubmitting ||
-              !firstName.trim() ||
-              !lastName.trim() ||
-              !paymentMethod
-            }
-            sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}
-          >
-            {modalSubmitting ? <CircularProgress size={24} /> : "Request Subscription"}
-          </Button>
+          <Button onClick={() => setModalOpen(false)} disabled={modalSubmitting}>Cancel</Button>
+          <Button onClick={handleRequestSubscription} variant="contained" disabled={modalSubmitting || !firstName.trim() || !lastName.trim() || !paymentMethod} sx={{ bgcolor: GREEN, "&:hover": { bgcolor: DARK_GREEN } }}>{modalSubmitting ? <CircularProgress size={24} /> : "Request Subscription"}</Button>
         </DialogActions>
       </Dialog>
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: "100%" }}
-        >
-          {snackbar.message}
-        </Alert>
+      <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: "bottom", horizontal: "center" }}>
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: "100%" }}>{snackbar.message}</Alert>
       </Snackbar>
     </Box>
   );

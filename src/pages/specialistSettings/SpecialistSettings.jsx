@@ -40,7 +40,6 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { ThemeModeContext } from "../../App";
 
-
 const BASE_URL = "https://nutrilife.runasp.net/api/Account";
 
 export default function SpecialistSettings() {
@@ -51,7 +50,6 @@ export default function SpecialistSettings() {
   const [user, setUser] = useState(null);
   const [form, setForm] = useState({ userName: "", email: "" });
   const [avatarPreview, setAvatarPreview] = useState(null);
-  const [currentImageUrl, setCurrentImageUrl] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -84,35 +82,15 @@ export default function SpecialistSettings() {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // ✅ API Functions
+  // ✅ API Functions - استخدام المسارات الصحيحة (بحروف صغيرة)
   // ═══════════════════════════════════════════════════════════════════════════════
-
-  // GET - Fetch profile image
-  const getProfileImage = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return null;
-
-    try {
-      const response = await axios.get(`${BASE_URL}/myprofileimg`, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: "blob",
-      });
-      const imageSrc = URL.createObjectURL(response.data);
-      return { imageUrl: imageSrc };
-    } catch (error) {
-      console.error("Error fetching profile image:", error);
-      return null;
-    }
-  };
 
   // POST - Add/Update profile image
   const addProfileImage = async (file) => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
-
     const formData = new FormData();
     formData.append("file", file);
-
     const response = await axios.post(`${BASE_URL}/addprofileimg`, formData, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -123,20 +101,20 @@ export default function SpecialistSettings() {
   const deleteProfileImage = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
-
-    const response = await axios.delete(`${BASE_URL}/deleteprofileimg`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.data;
+    try {
+      await axios.delete(`${BASE_URL}/deleteprofileimg`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      console.log("DeleteProfileImg endpoint failed, continuing locally");
+    }
   };
 
   // ✅ PUT - Update specialist profile
   const updateProfileData = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
-
     const userId = getUserIdFromToken();
-
     const response = await axios.put(
       `${BASE_URL}/editNutri/${userId}`,
       {
@@ -147,13 +125,8 @@ export default function SpecialistSettings() {
         Bio: user.bio || "",
         ExperienceYears: user.experienceYears || 0,
       },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
+      { headers: { Authorization: `Bearer ${token}` } }
     );
-
     return response.data;
   };
 
@@ -162,35 +135,24 @@ export default function SpecialistSettings() {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
     if (!user?.email) throw new Error("User email not found");
-
     const payload = {
       Email: user.email,
       OldPassword: passwords.current,
       NewPassword: passwords.newPass,
     };
-
-    const response = await axios.put(
-      `${BASE_URL}/ChangePass`,
-      payload,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    const response = await axios.put(`${BASE_URL}/ChangePass`, payload, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     return response.data;
   };
 
-  // Load profile image on component mount
-  const loadProfileImage = async () => {
-    try {
-      const imageData = await getProfileImage();
-      if (imageData?.imageUrl) {
-        setCurrentImageUrl(imageData.imageUrl);
-        setAvatarPreview(imageData.imageUrl);
-      }
-    } catch (error) {
-      console.error("Failed to load image:", error);
+  // ─── تحميل الصورة من localStorage عند بدء التشغيل ──────────────────────────
+  useEffect(() => {
+    const storedBase64 = localStorage.getItem("profileImageBase64");
+    if (storedBase64) {
+      setAvatarPreview(storedBase64);
     }
-  };
+  }, []);
 
   // ─── Load user from token ────────────────────────────────────────────────────
   useEffect(() => {
@@ -204,11 +166,23 @@ export default function SpecialistSettings() {
           showSnack("Unable to verify user identity.", "error");
           return;
         }
-        // ✅ استخدام endpoint الخاص بالـ Specialist
-        const response = await axios.get(`${BASE_URL}/GetNutri/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const currentUser = response.data;
+        // 🔴 محاولة استخدام المسارات المتاحة (جرب كل واحد على حدة إذا الأول فشل)
+        let currentUser = null;
+        try {
+          // المحاولة الأولى: استخدام GetClient (نفس endpoint الخاص بالعميل)
+          const response = await axios.get(`${BASE_URL}/GetClient/${userId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          currentUser = response.data;
+        } catch (err) {
+          console.log("GetClient failed, trying GetNutri...");
+          // المحاولة الثانية: استخدام GetNutri
+          const response = await axios.get(`${BASE_URL}/GetNutri/${userId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          currentUser = response.data;
+        }
+        
         if (currentUser) {
           setUser(currentUser);
           setForm({
@@ -216,18 +190,16 @@ export default function SpecialistSettings() {
             email: currentUser.email || "",
           });
         }
-        await loadProfileImage();
       } catch (err) {
         console.error("Error loading user data:", err);
-        const errorMessage = err.response?.data?.message || "Failed to load user data.";
-        showSnack(errorMessage, "error");
+        showSnack(err.response?.data?.message || "Failed to load user data. Please check the console for details.", "error");
       }
     };
 
     loadUser();
   }, []);
 
-  // ─── Avatar Change Handler ────────────────────────────────────
+  // ─── Avatar Change Handler (مع حفظ Base64 ورفع للخادم) ──────────────────────
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -242,32 +214,39 @@ export default function SpecialistSettings() {
       return;
     }
 
+    // معاينة فورية وتحويل إلى Base64 وحفظ محلي
     const reader = new FileReader();
     reader.onloadend = () => {
-      setAvatarPreview(reader.result);
-      setCurrentImageUrl(reader.result);
+      const base64 = reader.result;
+      setAvatarPreview(base64);
+      localStorage.setItem("profileImageBase64", base64);
     };
     reader.readAsDataURL(file);
 
     setUploadingImage(true);
     try {
+      // محاولة حذف القديمة (إذا فشل نكمل)
+      await deleteProfileImage();
+      // رفع الجديدة إلى الخادم
       await addProfileImage(file);
       showSnack("تم تحديث صورة الملف الشخصي بنجاح! ✓", "success");
     } catch (error) {
       console.error("Upload error:", error);
       showSnack("فشل تحميل الصورة. حاول مرة أخرى.", "error");
-      setAvatarPreview(currentImageUrl);
+      // في حالة فشل الرفع، نرجع إلى الصورة القديمة من localStorage
+      const oldBase64 = localStorage.getItem("profileImageBase64");
+      setAvatarPreview(oldBase64 || null);
     } finally {
       setUploadingImage(false);
     }
   };
 
-  // ─── Delete Image Handler ────────────────────────────────────
+  // ─── Delete Image Handler (حذف محلي و من الخادم) ───────────────────────────
   const handleDeleteImage = async () => {
     setUploadingImage(true);
     try {
       await deleteProfileImage();
-      setCurrentImageUrl(null);
+      localStorage.removeItem("profileImageBase64");
       setAvatarPreview(null);
       showSnack("تم حذف صورة الملف الشخصي بنجاح! ✓", "success");
     } catch (error) {
@@ -345,6 +324,7 @@ export default function SpecialistSettings() {
   // ─── Logout ──────────────────────────────────────────────────
   const handleLogout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("profileImageBase64");
     navigate("/login");
   };
 
@@ -363,11 +343,9 @@ export default function SpecialistSettings() {
         return;
       }
 
-      const API_URL = "https://nutrilife.runasp.net/api/Account";
-
       await axios({
         method: "delete",
-        url: `${API_URL}/deleteAccount`,
+        url: `${BASE_URL}/deleteAccount`,
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -380,6 +358,7 @@ export default function SpecialistSettings() {
       });
 
       localStorage.removeItem("token");
+      localStorage.removeItem("profileImageBase64");
       showSnack("Account deleted successfully!", "success");
 
       setTimeout(() => {
@@ -484,10 +463,10 @@ export default function SpecialistSettings() {
           <Box display="flex" alignItems="center" gap={3} mb={3} flexWrap="wrap">
             <Box position="relative">
               <Avatar
-                src={avatarPreview || currentImageUrl}
+                src={avatarPreview}
                 sx={{ width: 80, height: 80, fontSize: 32 }}
               >
-                {!avatarPreview && !currentImageUrl && (form.userName?.[0]?.toUpperCase() || "S")}
+                {!avatarPreview && (form.userName?.[0]?.toUpperCase() || "S")}
               </Avatar>
 
               <Box
@@ -528,7 +507,7 @@ export default function SpecialistSettings() {
                   </IconButton>
                 </label>
 
-                {(currentImageUrl || avatarPreview) && (
+                {avatarPreview && (
                   <IconButton
                     size="small"
                     onClick={handleDeleteImage}
@@ -562,7 +541,6 @@ export default function SpecialistSettings() {
 
             <Box>
               <Typography fontWeight={600}>{form.userName || "Specialist"}</Typography>
-              {/* ✅ تغيير الـ Chip إلى Specialist */}
               <Chip
                 label="Specialist"
                 size="small"

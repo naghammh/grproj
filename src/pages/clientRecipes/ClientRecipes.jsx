@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -13,232 +13,324 @@ import {
   IconButton,
   Stack,
   Typography,
+  Alert,
+  CircularProgress,
 } from "@mui/material";
 import {
   AccessTime,
   Close,
-  LocalFireDepartment,
   Restaurant,
+  BookmarkBorder,
+  Bookmark,
+  Visibility,
 } from "@mui/icons-material";
 
-const API_URL = "PUT_CLIENT_RECIPES_API_HERE";
+const API_BASE = "https://nutrilife.runasp.net/api";
 
-const fallbackRecipes = [
-  {
-    id: 1,
-    title: "Atlantic Salmon & Quinoa",
-    category: "Dinner",
-    calories: 450,
-    time: "15 mins",
-    image:
-      "https://images.unsplash.com/photo-1485921325833-c519f76c4927?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "Heart-healthy omega-3 fats paired with balanced grains.",
-    description:
-      "A nourishing salmon and quinoa plate designed for steady energy, healthy fats, and a balanced protein-rich meal.",
-    ingredients: [
-      "Salmon fillet",
-      "Cooked quinoa",
-      "Asparagus",
-      "Cherry tomatoes",
-      "Olive oil",
-      "Lemon juice",
-    ],
-    instructions:
-      "Season the salmon, bake or grill until cooked through, then serve with quinoa and vegetables. Finish with lemon juice and olive oil.",
-  },
-  {
-    id: 2,
-    title: "Mediterranean Buddha Bowl",
-    category: "Lunch",
-    calories: 380,
-    time: "20 mins",
-    image:
-      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "A colorful mix of roasted vegetables and chickpeas.",
-    description:
-      "A fiber-rich bowl packed with roasted vegetables, chickpeas, greens, and a light dressing.",
-    ingredients: [
-      "Chickpeas",
-      "Avocado",
-      "Sweet potato",
-      "Greens",
-      "Tahini dressing",
-    ],
-    instructions:
-      "Roast the vegetables, warm the chickpeas, then arrange everything in a bowl with greens and dressing.",
-  },
-  {
-    id: 3,
-    title: "Lemon Herb Chicken Salad",
-    category: "Lunch",
-    calories: 320,
-    time: "12 mins",
-    image:
-      "https://images.unsplash.com/photo-1604909052743-94e838986d24?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "Lean protein infused with zesty citrus and herbs.",
-    description:
-      "A fresh chicken salad made for a light but satisfying meal with lean protein and crisp vegetables.",
-    ingredients: [
-      "Grilled chicken breast",
-      "Romaine lettuce",
-      "Cherry tomatoes",
-      "Cucumber",
-      "Lemon herb dressing",
-    ],
-    instructions:
-      "Slice grilled chicken, combine with fresh vegetables, then toss gently with lemon herb dressing.",
-  },
-  {
-    id: 4,
-    title: "Berry Power Overnight Oats",
-    category: "Breakfast",
-    calories: 290,
-    time: "10 mins",
-    image:
-      "https://images.unsplash.com/photo-1517673132405-a56a62b18caf?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "Sustained energy with high fiber and berries.",
-    description:
-      "A simple overnight oats recipe rich in fiber, antioxidants, and slow-digesting carbohydrates.",
-    ingredients: [
-      "Rolled oats",
-      "Greek yogurt",
-      "Milk",
-      "Blueberries",
-      "Strawberries",
-      "Chia seeds",
-    ],
-    instructions:
-      "Mix oats, yogurt, milk, and chia seeds. Refrigerate overnight, then top with berries before serving.",
-  },
-  {
-    id: 5,
-    title: "Garden Hummus Wrap",
-    category: "Snack",
-    calories: 410,
-    time: "8 mins",
-    image:
-      "https://images.unsplash.com/photo-1626700051175-6818013e1d4f?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "A quick portable lunch option packed with vegetables.",
-    description:
-      "A colorful wrap with hummus and crunchy vegetables, perfect for a quick client-friendly meal.",
-    ingredients: [
-      "Whole wheat wrap",
-      "Hummus",
-      "Lettuce",
-      "Bell pepper",
-      "Carrot",
-      "Cucumber",
-    ],
-    instructions:
-      "Spread hummus over the wrap, add vegetables, roll tightly, and slice before serving.",
-  },
-  {
-    id: 6,
-    title: "Herbed Lentil Soup",
-    category: "Dinner",
-    calories: 350,
-    time: "25 mins",
-    image:
-      "https://images.unsplash.com/photo-1547592166-23ac45744acd?q=80&w=900&auto=format&fit=crop",
-    shortDescription: "A warming high-fiber soup designed for fullness.",
-    description:
-      "A comforting lentil soup rich in plant protein, fiber, and herbs for a balanced warm meal.",
-    ingredients: [
-      "Red lentils",
-      "Carrot",
-      "Onion",
-      "Garlic",
-      "Vegetable broth",
-      "Parsley",
-    ],
-    instructions:
-      "Cook onion, carrot, and garlic, then add lentils and broth. Simmer until soft and finish with parsley.",
-  },
-];
+const ENDPOINTS = {
+  getPost: (id) => `${API_BASE}/Posts/${id}`,
+  allPosts: `${API_BASE}/Posts/all`,
+  savedPosts: `${API_BASE}/Posts/saved`,
+  toggleSave: (id) => `${API_BASE}/Posts/toggle/${id}`,
+};
 
-export default function ClientRecipesPage() {
-  const [recipes, setRecipes] = useState([]);
-  const [selectedRecipe, setSelectedRecipe] = useState(null);
+const getValidValue = (value) => {
+  if (value === null || value === undefined) return "";
+  const stringValue = String(value).trim();
+  if (
+    !stringValue ||
+    stringValue.toLowerCase() === "null" ||
+    stringValue.toLowerCase() === "undefined"
+  ) {
+    return "";
+  }
+  return stringValue;
+};
 
-  useEffect(() => {
-    fetchRecipes();
+const getToken = () => getValidValue(localStorage.getItem("token"));
+
+const authHeaders = () => {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+// === دوال التعامل مع localStorage لحفظ IDs البوستات ===
+const STORAGE_KEY = "savedPostIds";
+
+const getSavedPostIds = () => {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+};
+
+const setSavedPostIds = (ids) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+};
+
+// إضافة أو إزالة ID من المصفوفة المحفوظة
+const toggleSavedId = (postId, currentSaved) => {
+  const currentIds = getSavedPostIds();
+  let newIds;
+  if (currentSaved) {
+    // إزالة الـ ID
+    newIds = currentIds.filter(id => id !== postId);
+  } else {
+    // إضافة الـ ID إذا لم يكن موجوداً
+    if (!currentIds.includes(postId)) {
+      newIds = [...currentIds, postId];
+    } else {
+      newIds = currentIds;
+    }
+  }
+  setSavedPostIds(newIds);
+  return newIds;
+};
+
+const normalizePost = (post) => {
+  let imagesArray = [];
+  const rawImages =
+    post.postImgs || post.PostImgs || post.images || post.Images || [];
+
+  if (Array.isArray(rawImages)) {
+    imagesArray = rawImages
+      .map((img) => {
+        if (typeof img === "string") return img;
+        return img?.imageUrl || img?.ImageUrl || img?.url || img?.Url || "";
+      })
+      .filter(Boolean);
+  }
+
+  const firstImage = imagesArray.length > 0 ? imagesArray[0] : "";
+
+  return {
+    id: post.id || post.Id || post.postId || post.PostId,
+    title: post.title || post.Title || "",
+    content: post.content || post.Content || "",
+    date: post.createdAt || post.CreatedAt || post.date || post.Date || "",
+    image: firstImage,
+    images: imagesArray,
+    creatorName: post.creatorName || post.CreatorName || "",
+    isSaved: false, // سنقوم بتعيينها لاحقاً بناءً على localStorage
+  };
+};
+
+const normalizePostsResponse = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.posts)) return data.posts;
+  if (Array.isArray(data?.result)) return data.result;
+  return [];
+};
+
+export default function PublicPostsPage() {
+  const [posts, setPosts] = useState([]);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [viewMode, setViewMode] = useState("all");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // دمج بيانات البوستات مع حالة الحفظ من localStorage
+  const mergeSavedStatus = (postsArray) => {
+    const savedIds = getSavedPostIds();
+    return postsArray.map(post => ({
+      ...post,
+      isSaved: savedIds.includes(post.id)
+    }));
+  };
+
+  const fetchAllPosts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(ENDPOINTS.allPosts);
+      if (!response.ok) throw new Error("Failed to fetch posts");
+      const data = await response.json();
+      let postsArray = normalizePostsResponse(data);
+      let normalized = postsArray.map(normalizePost);
+      normalized = mergeSavedStatus(normalized);
+      setPosts(normalized);
+    } catch (err) {
+      console.error(err);
+      setError("Could not load posts. Please try again later.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const fetchRecipes = async () => {
+  const fetchSavedPosts = useCallback(async () => {
+    if (!getToken()) {
+      setError("Please log in to view saved posts.");
+      return;
+    }
+    setLoading(true);
+    setError("");
     try {
-      // لما تبعتيلي API الحقيقي بنفعّل هذا الجزء:
-      // const res = await fetch(API_URL);
-      // const data = await res.json();
-      // setRecipes(data);
+      const response = await fetch(ENDPOINTS.savedPosts, {
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("Failed to fetch saved posts");
+      const data = await response.json();
+      let postsArray = normalizePostsResponse(data);
+      let normalized = postsArray.map(normalizePost);
+      // عند عرض المحفوظات، نضمن أن isSaved = true لكل البوستات (لأنها قادمة من API المحفوظات)
+      normalized = normalized.map(post => ({ ...post, isSaved: true }));
+      // تحديث localStorage ليتوافق مع ما جاء من API (مزامنة)
+      const idsFromApi = normalized.map(p => p.id);
+      setSavedPostIds(idsFromApi);
+      setPosts(normalized);
+    } catch (err) {
+      console.error(err);
+      setError("Could not load saved posts.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-      setRecipes(fallbackRecipes);
-    } catch (error) {
-      console.error("Failed to fetch recipes:", error);
-      setRecipes(fallbackRecipes);
+  const toggleSave = async (postId, currentSavedState) => {
+    if (!getToken()) {
+      setError("Please log in to save posts.");
+      return;
+    }
+    // تحديث localStorage أولاً للحصول على استجابة فورية في الواجهة
+    const newSavedIds = toggleSavedId(postId, currentSavedState);
+    // تحديث حالة البوستات محلياً
+    setPosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { ...p, isSaved: !currentSavedState } : p
+      )
+    );
+    // إرسال الطلب إلى الخادوم (نحاول حتى لو فشل، سنبقى على الحالة المحلية)
+    try {
+      await fetch(ENDPOINTS.toggleSave(postId), {
+        method: "POST",
+        headers: authHeaders(),
+      });
+    } catch (err) {
+      console.error("Toggle save API failed:", err);
+      // في حال فشل الـ API، نرجع الحالة القديمة
+      toggleSavedId(postId, !currentSavedState); // نرجع localStorage للحالة السابقة
+      setPosts(prevPosts =>
+        prevPosts.map(p =>
+          p.id === postId ? { ...p, isSaved: currentSavedState } : p
+        )
+      );
+      setError("Could not save/unsave post. Please try again.");
     }
   };
 
+  const fetchPostDetails = async (postId) => {
+    try {
+      const response = await fetch(ENDPOINTS.getPost(postId), {
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("Failed to fetch post details");
+      const data = await response.json();
+      const normalized = normalizePost(data);
+      // إضافة حالة الحفظ من localStorage
+      const savedIds = getSavedPostIds();
+      return { ...normalized, isSaved: savedIds.includes(normalized.id) };
+    } catch (err) {
+      console.error(err);
+      setError("Could not load post details.");
+      return null;
+    }
+  };
+
+  const handleViewPost = async (post) => {
+    if (post.content && post.title) {
+      setSelectedPost(post);
+    } else {
+      const fullPost = await fetchPostDetails(post.id);
+      setSelectedPost(fullPost);
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode === "all") fetchAllPosts();
+    else fetchSavedPosts();
+  }, [viewMode, fetchAllPosts, fetchSavedPosts]);
+
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        bgcolor: "#f7f8fc",
-        color: "#111827",
-      }}
-    >
-      <Box
-        sx={{
-          maxWidth: 1180,
-          mx: "auto",
-          px: { xs: 2, md: 4 },
-          py: { xs: 3, md: 5 },
-        }}
-      >
-        <Box mb={3}>
-          <Typography
-            variant="h4"
-            fontWeight={800}
-            sx={{ fontSize: { xs: 26, md: 34 } }}
+    <Box sx={{ minHeight: "100vh", bgcolor: "#f7f8fc", color: "#111827" }}>
+      <Box sx={{ maxWidth: 1180, mx: "auto", px: { xs: 2, md: 4 }, py: { xs: 3, md: 5 } }}>
+        <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems="center" mb={4}>
+          <Box>
+            <Typography variant="h4" fontWeight={800} sx={{ fontSize: { xs: 26, md: 34 } }}>
+              Nutrition Posts
+            </Typography>
+            <Typography color="text.secondary" mt={0.5}>
+              Discover healthy tips and meal ideas from our specialists
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant={viewMode === "all" ? "contained" : "outlined"}
+              onClick={() => setViewMode("all")}
+              sx={{ borderRadius: 999, textTransform: "none" }}
+            >
+              All Posts
+            </Button>
+            <Button
+              variant={viewMode === "saved" ? "contained" : "outlined"}
+              onClick={() => setViewMode("saved")}
+              sx={{ borderRadius: 999, textTransform: "none" }}
+            >
+              Saved
+            </Button>
+          </Stack>
+        </Stack>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>
+            {error}
+          </Alert>
+        )}
+
+        {loading ? (
+          <Box display="flex" justifyContent="center" py={5}>
+            <CircularProgress sx={{ color: "#00874f" }} />
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" },
+              gap: 3,
+            }}
           >
-            Recommended Recipes
-          </Typography>
-
-          <Typography color="text.secondary" mt={0.5}>
-            Healthy meals prepared by your nutritionist
-          </Typography>
-        </Box>
-
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: {
-              xs: "1fr",
-              sm: "repeat(2, 1fr)",
-              lg: "repeat(3, 1fr)",
-            },
-            gap: 3,
-          }}
-        >
-          {recipes.map((recipe) => (
-            <RecipeClientCard
-              key={recipe.id}
-              recipe={recipe}
-              onView={() => setSelectedRecipe(recipe)}
-            />
-          ))}
-        </Box>
+            {posts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onView={() => handleViewPost(post)}
+                onToggleSave={() => toggleSave(post.id, post.isSaved)}
+              />
+            ))}
+            {posts.length === 0 && !loading && (
+              <Typography sx={{ gridColumn: "1/-1", textAlign: "center", py: 4 }} color="text.secondary">
+                No posts found.
+              </Typography>
+            )}
+          </Box>
+        )}
       </Box>
-
-      <RecipeDetailsModal
-        recipe={selectedRecipe}
-        open={Boolean(selectedRecipe)}
-        onClose={() => setSelectedRecipe(null)}
-      />
+      <PostDetailsModal post={selectedPost} open={Boolean(selectedPost)} onClose={() => setSelectedPost(null)} />
     </Box>
   );
 }
 
-function RecipeClientCard({ recipe, onView }) {
+function PostCard({ post, onView, onToggleSave }) {
+  const formattedDate = post.date ? new Date(post.date).toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  }) : "";
+
   return (
     <Card
       sx={{
@@ -247,64 +339,71 @@ function RecipeClientCard({ recipe, onView }) {
         boxShadow: "0 10px 28px rgba(15, 23, 42, 0.08)",
         border: "1px solid #edf0f5",
         bgcolor: "#fff",
+        transition: "transform 0.2s",
+        "&:hover": { transform: "translateY(-4px)" },
       }}
     >
       <Box sx={{ position: "relative" }}>
-        <CardMedia
-          component="img"
-          image={recipe.image}
-          alt={recipe.title}
-          sx={{
-            height: 210,
-            objectFit: "cover",
-          }}
-        />
+        {post.image ? (
+          <CardMedia
+            component="img"
+            image={post.image}
+            alt={post.title}
+            sx={{ height: 210, objectFit: "cover" }}
+            onError={(e) => { e.target.onerror = null; e.target.src = "https://via.placeholder.com/300x200?text=No+Image"; }}
+          />
+        ) : (
+          <Box sx={{ height: 210, bgcolor: "#e2e8f0", display: "grid", placeItems: "center" }}>
+            <Restaurant sx={{ fontSize: 48, color: "#94a3b8" }} />
+          </Box>
+        )}
 
-        <Chip
-          icon={<LocalFireDepartment sx={{ fontSize: 15 }} />}
-          label={`${recipe.calories} kcal`}
-          size="small"
+        <IconButton
+          onClick={onToggleSave}
           sx={{
             position: "absolute",
-            top: 12,
-            right: 12,
-            bgcolor: "#e5f8ed",
-            color: "#00874f",
-            fontWeight: 800,
-            backdropFilter: "blur(6px)",
+            top: 10,
+            right: 10,
+            bgcolor: "rgba(255,255,255,0.9)",
+            "&:hover": { bgcolor: "#fff" },
           }}
-        />
+        >
+          {post.isSaved ? (
+            <Bookmark sx={{ color: "#00874f" }} />
+          ) : (
+            <BookmarkBorder sx={{ color: "#64748b" }} />
+          )}
+        </IconButton>
       </Box>
 
       <CardContent sx={{ p: 2 }}>
-        <Stack direction="row" spacing={1} alignItems="center" mb={1}>
-          <AccessTime sx={{ fontSize: 15, color: "#00874f" }} />
-          <Typography fontSize={12} color="text.secondary">
-            {recipe.time}
-          </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+          <Chip label={post.creatorName || "Specialist"} size="small" sx={{ bgcolor: "#eef3ff", fontWeight: 600 }} />
+          {formattedDate && <Typography fontSize={12} color="text.secondary">{formattedDate}</Typography>}
         </Stack>
 
-        <Typography fontWeight={800} mb={0.7}>
-          {recipe.title}
+        <Typography fontWeight={800} mb={1} sx={{ fontSize: 18 }}>
+          {post.title}
         </Typography>
 
         <Typography
           fontSize={13}
           color="text.secondary"
           sx={{
-            minHeight: 38,
+            minHeight: 40,
             display: "-webkit-box",
             WebkitLineClamp: 2,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
           }}
         >
-          {recipe.shortDescription || recipe.description}
+          {post.content}
         </Typography>
 
         <Button
           fullWidth
           variant="contained"
+          startIcon={<Visibility />}
           onClick={onView}
           sx={{
             mt: 2,
@@ -313,20 +412,18 @@ function RecipeClientCard({ recipe, onView }) {
             textTransform: "none",
             fontWeight: 800,
             py: 1,
-            "&:hover": {
-              bgcolor: "#006633",
-            },
+            "&:hover": { bgcolor: "#006633" },
           }}
         >
-          View Recipe
+          Read More
         </Button>
       </CardContent>
     </Card>
   );
 }
 
-function RecipeDetailsModal({ open, onClose, recipe }) {
-  if (!recipe) return null;
+function PostDetailsModal({ open, onClose, post }) {
+  if (!post) return null;
 
   return (
     <Dialog
@@ -334,152 +431,57 @@ function RecipeDetailsModal({ open, onClose, recipe }) {
       onClose={onClose}
       maxWidth="md"
       fullWidth
-      PaperProps={{
-        sx: {
-          borderRadius: 3,
-          overflow: "hidden",
-          boxShadow: "0 24px 80px rgba(15, 23, 42, 0.25)",
-        },
-      }}
-      BackdropProps={{
-        sx: {
-          bgcolor: "rgba(15, 23, 42, 0.35)",
-          backdropFilter: "blur(6px)",
-        },
-      }}
+      PaperProps={{ sx: { borderRadius: 3, overflow: "hidden" } }}
+      BackdropProps={{ sx: { bgcolor: "rgba(15, 23, 42, 0.35)", backdropFilter: "blur(6px)" } }}
     >
       <Box sx={{ position: "relative" }}>
-        <Box
-          component="img"
-          src={recipe.image}
-          alt={recipe.title}
-          sx={{
-            width: "100%",
-            height: { xs: 220, md: 320 },
-            objectFit: "cover",
-            display: "block",
-          }}
-        />
-
-        <IconButton
-          onClick={onClose}
-          sx={{
-            position: "absolute",
-            top: 14,
-            right: 14,
-            bgcolor: "rgba(255,255,255,0.92)",
-            "&:hover": { bgcolor: "#fff" },
-          }}
-        >
+        {post.image ? (
+          <Box
+            component="img"
+            src={post.image}
+            alt={post.title}
+            sx={{ width: "100%", height: { xs: 220, md: 320 }, objectFit: "cover", display: "block" }}
+          />
+        ) : (
+          <Box sx={{ height: 220, bgcolor: "#e2e8f0", display: "grid", placeItems: "center" }}>
+            <Restaurant sx={{ fontSize: 64, color: "#94a3b8" }} />
+          </Box>
+        )}
+        <IconButton onClick={onClose} sx={{ position: "absolute", top: 14, right: 14, bgcolor: "rgba(255,255,255,0.92)" }}>
           <Close />
         </IconButton>
       </Box>
 
       <DialogTitle sx={{ pb: 1 }}>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          justifyContent="space-between"
-          spacing={2}
-        >
-          <Box>
-            <Typography variant="h5" fontWeight={900}>
-              {recipe.title}
-            </Typography>
-
-            <Typography color="text.secondary" fontSize={14} mt={0.5}>
-              {recipe.description}
-            </Typography>
-          </Box>
-
-          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
-            <Chip
-              icon={<AccessTime />}
-              label={recipe.time}
-              sx={{
-                bgcolor: "#eef3ff",
-                fontWeight: 700,
-              }}
-            />
-
-            <Chip
-              icon={<LocalFireDepartment />}
-              label={`${recipe.calories} kcal`}
-              sx={{
-                bgcolor: "#e5f8ed",
-                color: "#00874f",
-                fontWeight: 800,
-              }}
-            />
-          </Stack>
+        <Typography variant="h5" fontWeight={900}>{post.title}</Typography>
+        <Stack direction="row" spacing={2} alignItems="center" mt={1}>
+          <Chip label={post.creatorName || "Specialist"} size="small" sx={{ bgcolor: "#eef3ff" }} />
+          {post.date && (
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              <AccessTime sx={{ fontSize: 14, color: "#64748b" }} />
+              <Typography fontSize={13} color="text.secondary">
+                {new Date(post.date).toLocaleDateString()}
+              </Typography>
+            </Stack>
+          )}
         </Stack>
       </DialogTitle>
 
-      <DialogContent sx={{ pt: 1, pb: 3 }}>
-        <Divider sx={{ mb: 3 }} />
-
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "0.8fr 1.2fr" },
-            gap: 3,
-          }}
-        >
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center" mb={1.5}>
-              <Restaurant sx={{ color: "#00874f" }} />
-              <Typography fontWeight={900}>Ingredients</Typography>
-            </Stack>
-
-            <Stack spacing={1}>
-              {(recipe.ingredients || []).map((item, index) => (
-                <Box
-                  key={index}
-                  sx={{
-                    px: 1.5,
-                    py: 1,
-                    borderRadius: 1.5,
-                    bgcolor: "#f1f5f9",
-                    fontSize: 14,
-                    fontWeight: 600,
-                  }}
-                >
-                  {item}
-                </Box>
+      <DialogContent sx={{ pb: 3 }}>
+        <Divider sx={{ mb: 2 }} />
+        <Typography color="text.secondary" sx={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+          {post.content}
+        </Typography>
+        {post.images && post.images.length > 1 && (
+          <Box mt={3}>
+            <Typography fontWeight={800} mb={1}>Additional Images</Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap">
+              {post.images.slice(1).map((img, idx) => (
+                <Box key={idx} component="img" src={img} sx={{ width: 80, height: 80, objectFit: "cover", borderRadius: 1 }} />
               ))}
             </Stack>
           </Box>
-
-          <Box>
-            <Typography fontWeight={900} mb={1.5}>
-              Preparation
-            </Typography>
-
-            <Typography
-              color="text.secondary"
-              sx={{
-                lineHeight: 1.8,
-                bgcolor: "#f8fafc",
-                borderRadius: 2,
-                p: 2,
-                border: "1px solid #edf0f5",
-              }}
-            >
-              {recipe.instructions}
-            </Typography>
-
-            {recipe.category && (
-              <Chip
-                label={recipe.category}
-                sx={{
-                  mt: 2,
-                  bgcolor: "#dff7ea",
-                  color: "#007a3d",
-                  fontWeight: 800,
-                }}
-              />
-            )}
-          </Box>
-        </Box>
+        )}
       </DialogContent>
     </Dialog>
   );

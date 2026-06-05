@@ -24,7 +24,7 @@ import ClientRecipes from "./pages/clientRecipes/ClientRecipes";
 import Progress from "./pages/progress/Progress";
 import ClientSettings from "./pages/clientSettings/ClientSettings";
 import Appointments from "./pages/appointments/Appointments";
-import SpecialistRecipes from "./pages/specialistRecipes/SpecialistRecipes";
+import SpecialistPosts from "./pages/specialistPosts/SpecialistPosts";
 import Programs from "./pages/programs/Programs";
 import SpecialistSettings from "./pages/specialistSettings/SpecialistSettings";
 import SpecialistMessages from "./pages/specialistMessages/SpecialistMessages";
@@ -54,6 +54,9 @@ const router = createBrowserRouter([
       { path: "/forgot-password", element: <ForgotPassword /> },
       { path: "/verify-email", element: <VerifyEmail /> },
       { path: "/verify-and-reset", element: <VerifyAndReset /> },
+      { path: "/specialists", element: <Specialists /> },
+      { path: "/specialist/:id", element: <Specialist /> }
+
     ],
   },
 
@@ -61,13 +64,7 @@ const router = createBrowserRouter([
     path: "/",
     element: <ClientSideBarLayout />,  
     children: [
-      { path: "/specialist/:id", 
-      element: <Specialist /> 
-    },
-
-      { path: "/specialists", 
-      element: <Specialists />
-     },
+     
       {
         path: "/clientdashboard",
         element: (
@@ -198,10 +195,10 @@ const router = createBrowserRouter([
         ),
       },
       {
-        path: "/specialistRecipes",
+        path: "/specialistPosts",
         element: (
           <ProtectedRoute allowedRole="Nutritionist">
-            <SpecialistRecipes />
+            <SpecialistPosts />
           </ProtectedRoute>
         ),
       },

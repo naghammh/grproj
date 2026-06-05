@@ -92,10 +92,10 @@ export default function SpecialistSideBarLayout() {
         </Typography>
 
         <Typography
-          sx={linkStyle("/specialistRecipes")}
-          onClick={() => navigate("/specialistRecipes")}
+          sx={linkStyle("/specialistPosts")}
+          onClick={() => navigate("/specialistPosts")}
         >
-          Recipes
+          My Posts
         </Typography>
 
         
