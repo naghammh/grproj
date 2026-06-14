@@ -31,6 +31,7 @@ import axios from "axios";
 
 const ACTIVE_CLIENTS_KEY = "activeClientsCache";
 const MEAL_PLAN_API = "https://nutrilife.runasp.net/api/MealPlan";
+const CLIENTS_API = "https://nutrilife.runasp.net/api/Subscription/GetMyClients";
 
 export default function Programs() {
   const [clients, setClients] = useState([]);
@@ -49,6 +50,7 @@ export default function Programs() {
 
   const [newPlan, setNewPlan] = useState({ title: "", StartDate: "" });
   const [newDay, setNewDay] = useState({ DayNumber: "", notes: "" });
+  const [manualClientId, setManualClientId] = useState("");
 
   const [mealForm, setMealForm] = useState({
     MealType: "Breakfast",
@@ -69,10 +71,8 @@ export default function Programs() {
     setSnackbar({ open: true, message, severity });
   };
 
-  // ✅ دالة محسنة لاستخراج clientId (تدعم الأرقام)
   const getClientId = (client) => {
     if (!client) return null;
-    
     return client.clientId || 
            client.ClientId || 
            client.id || 
@@ -86,7 +86,6 @@ export default function Programs() {
 
   const getClientName = (client) => {
     if (!client) return "Unknown Client";
-    
     return client.clientName ||
            client.ClientName ||
            client.fullName ||
@@ -117,12 +116,14 @@ export default function Programs() {
     return "default";
   };
 
-  // جلب برامج العميل
+  // ✅✅✅ جلب برامج العميل - النسخة الذكية ✅✅✅
   const fetchClientPrograms = async (clientId) => {
-    if (!clientId) return;
-
+    console.log("🔍 fetchClientPrograms called with clientId:", clientId);
+    if (!clientId) {
+      console.warn("❌ No clientId provided");
+      return;
+    }
     setLoadingPlans(true);
-
     try {
       const token = getToken();
       if (!token) {
@@ -130,53 +131,109 @@ export default function Programs() {
         setLoadingPlans(false);
         return;
       }
-
-      // ✅ استخدام clientId كما هو (رقم أو GUID)
-      const url = `${MEAL_PLAN_API}/MyclientPlans-Summary?clientId=${clientId}`;
-      console.log("Fetching programs from:", url);
       
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
+      // قائمة بكل الروابط المحتملة
+      const endpoints = [
+        `${MEAL_PLAN_API}/MyclientPlansS/${clientId}`,
+        `${MEAL_PLAN_API}/MyclientPlans/${clientId}`,
+        `${MEAL_PLAN_API}/MyclientPlans-Summary/${clientId}`,
+        `${MEAL_PLAN_API}/client/${clientId}/plans`,
+        `${MEAL_PLAN_API}/GetPlansByClientId/${clientId}`,
+        `${MEAL_PLAN_API}/GetClientPlans/${clientId}`,
+        `${MEAL_PLAN_API}/plans/client/${clientId}`,
+      ];
       
-      const data = Array.isArray(response.data) ? response.data : [];
-      setProgramData(data);
+      let lastError = null;
+      
+      for (const url of endpoints) {
+        try {
+          console.log("🌐 Trying URL:", url);
+          const response = await axios.get(url, {
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          });
+          
+          console.log("✅ SUCCESS with URL:", url);
+          console.log("📦 Response status:", response.status);
+          console.log("📦 Response data:", response.data);
+          
+          // استخراج البيانات
+          const raw = response.data;
+          let data = [];
+          
+          if (Array.isArray(raw)) {
+            data = raw;
+          } else if (raw?.$values && Array.isArray(raw.$values)) {
+            data = raw.$values;
+          } else if (raw?.data && Array.isArray(raw.data)) {
+            data = raw.data;
+          } else if (raw?.result && Array.isArray(raw.result)) {
+            data = raw.result;
+          } else if (raw?.items && Array.isArray(raw.items)) {
+            data = raw.items;
+          } else {
+            data = [];
+          }
+          
+          console.log("📋 Programs count:", data.length);
+          setProgramData(data);
+          return; // نجحنا, نخرج من الدالة
+        } catch (err) {
+          console.warn(`❌ Failed URL: ${url}`, err.response?.status);
+          lastError = err;
+        }
+      }
+      
+      // لو كل الروابط فشلت
+      throw lastError || new Error("All endpoints failed");
+      
     } catch (err) {
-      console.error("Fetch programs error:", err);
+      console.error("❌ All fetch attempts failed:", err);
       setProgramData([]);
+      showMessage("Failed to load programs. Please check API connection.", "error");
     } finally {
       setLoadingPlans(false);
     }
   };
 
-  // جلب العملاء من localStorage
-  const fetchClients = () => {
+  const fetchClients = async () => {
     setLoadingClients(true);
-    
     try {
-      const cachedClients = JSON.parse(localStorage.getItem(ACTIVE_CLIENTS_KEY)) || [];
-      
-      console.log("📋 Cached clients from localStorage:", cachedClients);
-      
-      if (cachedClients.length > 0) {
-        setClients(cachedClients);
-        
-        const firstClient = cachedClients[0];
+      const token = getToken();
+      if (!token) {
+        showMessage("Please login again", "error");
+        setLoadingClients(false);
+        return;
+      }
+      const response = await axios.get(CLIENTS_API, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let apiClients = Array.isArray(response.data) ? response.data : [];
+      if (apiClients.length > 0) {
+        setClients(apiClients);
+        const firstClient = apiClients[0];
         const firstClientId = getClientId(firstClient);
-        console.log("📌 First client ID:", firstClientId);
-        
         setSelectedClient(firstClient);
-        
-        if (firstClientId) {
-          fetchClientPrograms(firstClientId);
-        }
+        if (firstClientId) fetchClientPrograms(firstClientId);
       } else {
-        setClients([]);
-        showMessage("No active clients found. Please approve clients from the Clients page first.", "warning");
+        const cachedClients = JSON.parse(localStorage.getItem(ACTIVE_CLIENTS_KEY)) || [];
+        if (cachedClients.length > 0) {
+          setClients(cachedClients);
+          showMessage("Using cached clients data", "info");
+        } else {
+          setClients([]);
+          showMessage("No active clients found.", "warning");
+        }
       }
     } catch (err) {
       console.error("Get clients error:", err);
-      setClients([]);
+      const cachedClients = JSON.parse(localStorage.getItem(ACTIVE_CLIENTS_KEY)) || [];
+      if (cachedClients.length > 0) {
+        setClients(cachedClients);
+        showMessage("Using cached clients data", "info");
+      } else {
+        setClients([]);
+        showMessage("Failed to load clients", "error");
+      }
     } finally {
       setLoadingClients(false);
     }
@@ -196,13 +253,11 @@ export default function Programs() {
 
   const handleSelectClient = (client) => {
     const clientId = getClientId(client);
-    console.log("🔍 Selected client ID:", clientId);
     setSelectedClient(client);
     setProgramData([]);
     if (clientId) fetchClientPrograms(clientId);
   };
 
-  // عرض تفاصيل الخطة
   const handleViewPlan = async (planId) => {
     try {
       const token = getToken();
@@ -210,11 +265,9 @@ export default function Programs() {
         showMessage("Please login again", "error");
         return;
       }
-
       const res = await axios.get(`${MEAL_PLAN_API}/GetPlanById/${planId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
       setSelectedPlan(res.data);
       setDialogMode("view");
       setOpenDialog(true);
@@ -224,88 +277,53 @@ export default function Programs() {
     }
   };
 
-  // ✅ إضافة خطة جديدة - محسنة
+  // ✅✅✅ إضافة خطة ✅✅✅
   const handleAddPlan = async () => {
-    const clientId = getClientId(selectedClient);
-
+    const clientId = manualClientId || getClientId(selectedClient);
+    
+    console.log("🆔 CLIENT ID المستخدم للإضافة:", clientId);
+    
     if (!clientId) {
-      showMessage("Client ID not found. Please select a client.", "error");
+      showMessage("Please enter Client ID or select a client.", "error");
       return;
     }
-
     if (!newPlan.title || !newPlan.StartDate) {
       showMessage("Please fill all fields", "warning");
       return;
     }
-
     const token = getToken();
     if (!token) {
       showMessage("Please login again", "error");
       return;
     }
-
-    // ✅ تجربة الروابط والتنسيقات المختلفة
-    const urlsToTry = [
-      "https://nutrilife.runasp.net/api/MealPlan/AddMealPlan",
-      "https://nutrilife.runasp.net/api/MealPlan",
-      "https://nutrilife.runasp.net/api/MealPlan/CreateMealPlan",
-      "https://nutrilife.runasp.net/api/MealPlan/Create",
-      "https://nutrilife.runasp.net/api/MealPlan/Add",
-      "https://nutrilife.runasp.net/api/MealPlan/AddPlan",
-      "https://nutrilife.runasp.net/api/MealPlan/CreatePlan",
-      "https://nutrilife.runasp.net/api/Plans/AddMealPlan",
-      "https://nutrilife.runasp.net/api/Plans/CreateMealPlan",
-      "https://nutrilife.runasp.net/api/Plans/AddPlan",
-      "https://nutrilife.runasp.net/api/Plans/CreatePlan",
-      "https://nutrilife.runasp.net/api/Plans/Add",
-      "https://nutrilife.runasp.net/api/Plans",
-    ];
-
-    const formatsToTry = [
-      { ClientId: clientId, title: newPlan.title, StartDate: newPlan.StartDate },
-      { clientId: clientId, planName: newPlan.title, startDate: newPlan.StartDate },
-      { ClientId: clientId, PlanName: newPlan.title, StartDate: newPlan.StartDate },
-      { clientId: clientId, name: newPlan.title, startDate: newPlan.StartDate },
-      { ClientId: clientId, Name: newPlan.title, StartDate: newPlan.StartDate },
-      { subscriptionId: clientId, title: newPlan.title, StartDate: newPlan.StartDate },
-    ];
-
-    let success = false;
-
-    for (const url of urlsToTry) {
-      for (const planData of formatsToTry) {
-        try {
-          console.log("🔄 Trying URL:", url);
-          console.log("📦 With data:", planData);
-          
-          const response = await axios.post(url, planData, {
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          });
-          
-          console.log("✅ SUCCESS! URL:", url);
-          console.log("✅ Response:", response.data);
-          
-          success = true;
-          showMessage("Plan added successfully");
-          setNewPlan({ title: "", StartDate: "" });
-          setOpenDialog(false);
-          fetchClientPrograms(clientId);
-          break;
-          
-        } catch (err) {
-          console.log("❌ Failed:", url, err.response?.status);
-          continue;
-        }
-      }
-      if (success) break;
-    }
-
-    if (!success) {
-      showMessage("Failed to add plan. No working endpoint found.", "error");
+    const planData = {
+      clientId: clientId,
+      title: newPlan.title,
+      startDate: newPlan.StartDate,
+    };
+    
+    try {
+      console.log("🔄 Adding plan for client:", clientId);
+      const response = await axios.post(MEAL_PLAN_API, planData, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      console.log("✅ Add plan response:", response.data);
+      showMessage("Plan added successfully");
+      
+      setNewPlan({ title: "", StartDate: "" });
+      setManualClientId("");
+      setOpenDialog(false);
+      
+      console.log("🔄 جلب البرامج بعد الإضافة...");
+      await fetchClientPrograms(clientId);
+      console.log("✅ تم جلب البرامج بنجاح");
+      
+    } catch (err) {
+      console.error("Add plan error:", err);
+      showMessage(`Failed to add plan: ${err.response?.data?.message || err.message}`, "error");
     }
   };
 
-  // تفعيل خطة
   const handleActivatePlan = async (planId) => {
     try {
       const token = getToken();
@@ -313,58 +331,49 @@ export default function Programs() {
         showMessage("Please login again", "error");
         return;
       }
-
-      await axios.put(`${MEAL_PLAN_API}/activatePlan/${planId}`, {}, { 
+      await axios.put(`${MEAL_PLAN_API}/activate/${planId}`, {}, { 
         headers: { Authorization: `Bearer ${token}` } 
       });
-      
       showMessage("Plan activated successfully");
-      fetchClientPrograms(getClientId(selectedClient));
+      const clientId = manualClientId || getClientId(selectedClient);
+      if (clientId) await fetchClientPrograms(clientId);
     } catch (err) {
       console.error("Activate plan error:", err);
       showMessage("Failed to activate plan", "error");
     }
   };
 
-  // إضافة يوم
   const handleAddDay = async () => {
-    if (!selectedPlan || !newDay.DayNumber) {
+    if (!selectedPlan) {
+      showMessage("Please select a plan first", "warning");
+      return;
+    }
+    if (!newDay.DayNumber) {
       showMessage("Please enter day number", "warning");
       return;
     }
-
     try {
       const token = getToken();
       if (!token) {
         showMessage("Please login again", "error");
         return;
       }
-
-      const ADD_DAY_URL = `${MEAL_PLAN_API}/AddDay`;
-      const dayData = {
+      console.log("🔄 Adding day to plan:", getPlanId(selectedPlan));
+      await axios.post(`${MEAL_PLAN_API}/AddDay`, {
         mealPlanId: getPlanId(selectedPlan),
         DayNumber: Number(newDay.DayNumber),
         notes: newDay.notes,
-      };
-
-      console.log("Adding day - URL:", ADD_DAY_URL);
-      console.log("Adding day - Data:", dayData);
-
-      await axios.post(ADD_DAY_URL, dayData, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-
+      }, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
       showMessage("Day added successfully");
       setNewDay({ DayNumber: "", notes: "" });
       setOpenDialog(false);
-      fetchClientPrograms(getClientId(selectedClient));
+      await handleViewPlan(getPlanId(selectedPlan));
     } catch (err) {
       console.error("Add day error:", err);
       showMessage("Failed to add day", "error");
     }
   };
 
-  // حذف يوم
   const handleDeleteDay = async (dayId) => {
     try {
       const token = getToken();
@@ -372,99 +381,79 @@ export default function Programs() {
         showMessage("Please login again", "error");
         return;
       }
-
       await axios.delete(`${MEAL_PLAN_API}/Deleteday/${dayId}`, { 
         headers: { Authorization: `Bearer ${token}` } 
       });
-      
       showMessage("Day deleted successfully");
       setOpenDialog(false);
-      fetchClientPrograms(getClientId(selectedClient));
+      if (selectedPlan) await handleViewPlan(getPlanId(selectedPlan));
     } catch (err) {
       console.error("Delete day error:", err);
       showMessage("Failed to delete day", "error");
     }
   };
 
-  // إضافة وجبة
   const handleAddMeal = async () => {
-    if (!selectedPlan || !selectedDay || !mealForm.MealName) {
+    if (!selectedPlan || !selectedDay) {
+      showMessage("Please select a day first", "warning");
+      return;
+    }
+    if (!mealForm.MealName) {
       showMessage("Please fill meal name", "warning");
       return;
     }
-
     try {
       const token = getToken();
       if (!token) {
         showMessage("Please login again", "error");
         return;
       }
-
-      const ADD_MEAL_URL = `${MEAL_PLAN_API}/AddMeal`;
-      const mealData = {
+      console.log("🔄 Adding meal to day:", getDayId(selectedDay));
+      await axios.post(`${MEAL_PLAN_API}/AddMeal`, {
         mealPlanId: getPlanId(selectedPlan),
         PlanOfDayId: getDayId(selectedDay),
         MealType: mealForm.MealType,
         MealName: mealForm.MealName,
         MealDescription: mealForm.MealDescription,
         OrderIndex: Number(mealForm.OrderIndex),
-      };
-
-      console.log("Adding meal - URL:", ADD_MEAL_URL);
-      console.log("Adding meal - Data:", mealData);
-
-      const response = await axios.post(ADD_MEAL_URL, mealData, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-
-      console.log("Add meal response:", response.data);
-
+      }, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
       showMessage("Meal added successfully");
       setMealForm({ MealType: "Breakfast", MealName: "", MealDescription: "", OrderIndex: 0 });
       setOpenDialog(false);
-      fetchClientPrograms(getClientId(selectedClient));
+      if (selectedPlan) await handleViewPlan(getPlanId(selectedPlan));
     } catch (err) {
-      console.error("Add meal error:", err.response?.status, err.response?.data);
-      showMessage(`Failed to add meal: ${err.response?.status}`, "error");
+      console.error("Add meal error:", err);
+      showMessage("Failed to add meal", "error");
     }
   };
 
-  // تعديل وجبة
   const handleUpdateMeal = async () => {
     if (!selectedMeal || !mealForm.MealName) {
       showMessage("Please fill meal name", "warning");
       return;
     }
-
     try {
       const token = getToken();
       if (!token) {
         showMessage("Please login again", "error");
         return;
       }
-
-      await axios.put(
-        `${MEAL_PLAN_API}/Updatemeal`,
-        {
-          ScheduledMealId: getMealId(selectedMeal),
-          MealType: mealForm.MealType,
-          MealName: mealForm.MealName,
-          MealDescription: mealForm.MealDescription,
-          OrderIndex: Number(mealForm.OrderIndex),
-        },
-        { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
-      );
-
+      await axios.put(`${MEAL_PLAN_API}/Updatemeal`, {
+        ScheduledMealId: getMealId(selectedMeal),
+        MealType: mealForm.MealType,
+        MealName: mealForm.MealName,
+        MealDescription: mealForm.MealDescription,
+        OrderIndex: Number(mealForm.OrderIndex),
+      }, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
       showMessage("Meal updated successfully");
       setOpenDialog(false);
-      fetchClientPrograms(getClientId(selectedClient));
+      if (selectedPlan) await handleViewPlan(getPlanId(selectedPlan));
     } catch (err) {
       console.error("Update meal error:", err);
       showMessage("Failed to update meal", "error");
     }
   };
 
-  // حذف وجبة
   const handleDeleteMeal = async (mealId) => {
     try {
       const token = getToken();
@@ -472,14 +461,12 @@ export default function Programs() {
         showMessage("Please login again", "error");
         return;
       }
-
       await axios.delete(`${MEAL_PLAN_API}/Deletemeal/${mealId}`, { 
         headers: { Authorization: `Bearer ${token}` } 
       });
-      
       showMessage("Meal deleted successfully");
       setOpenDialog(false);
-      fetchClientPrograms(getClientId(selectedClient));
+      if (selectedPlan) await handleViewPlan(getPlanId(selectedPlan));
     } catch (err) {
       console.error("Delete meal error:", err);
       showMessage("Failed to delete meal", "error");
@@ -501,109 +488,105 @@ export default function Programs() {
 
   return (
     <Box sx={{ p: 4, bgcolor: "#f5f7fa", minHeight: "100vh" }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-        <Box>
-          <Typography variant="h3" fontWeight="bold">Programs</Typography>
-          <Typography color="text.secondary">Manage meal plans for your active clients</Typography>
-        </Box>
-        <Button variant="outlined" onClick={refreshClients} size="small">Refresh Clients</Button>
-      </Box>
+      <Typography variant="h3" fontWeight="bold">Programs</Typography>
+      <Typography color="text.secondary" sx={{ mb: 4 }}>Manage meal plans for your active clients</Typography>
 
-      <Grid container spacing={3}>
-        {/* قائمة العملاء */}
-        <Grid item xs={12} md={4}>
+      {clients.length === 0 ? (
+        <Card sx={{ mb: 4 }}>
+          <CardContent>
+            <Typography color="text.secondary">No active clients found.</Typography>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card sx={{ mb: 4, bgcolor: "#eef6ff", border: "1px solid #1976d2" }}>
+          <CardContent>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Avatar sx={{ width: 50, height: 50, bgcolor: "#1976d2" }}>
+                  {selectedClient ? getClientName(selectedClient).charAt(0) : clients[0] ? getClientName(clients[0]).charAt(0) : "?"}
+                </Avatar>
+                <Box>
+                  <Typography variant="h5" fontWeight="bold">
+                    {selectedClient ? getClientName(selectedClient) : clients[0] ? getClientName(clients[0]) : "Select a client"}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {getClientId(selectedClient || clients[0]) ? "✓ Active client" : "Missing client ID"}
+                  </Typography>
+                </Box>
+              </Box>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => {
+                  setDialogMode("addPlan");
+                  setOpenDialog(true);
+                }}
+              >
+                Add Plan
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>Active Clients ({clients.length})</Typography>
-              {clients.length === 0 ? (
-                <Typography color="text.secondary">No active clients found.</Typography>
-              ) : (
-                <Stack spacing={1.5}>
-                  {clients.map((client, index) => {
-                    const clientId = getClientId(client);
-                    const selectedClientId = getClientId(selectedClient);
-                    const isSelected = clientId && clientId === selectedClientId;
-
-                    return (
-                      <Card key={clientId || index} onClick={() => handleSelectClient(client)} sx={{ cursor: "pointer", border: isSelected ? "2px solid #1976d2" : "1px solid #e5e7eb", bgcolor: isSelected ? "#eef6ff" : "white" }}>
-                        <CardContent sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                          <Avatar>{getClientName(client).charAt(0)}</Avatar>
-                          <Box>
-                            <Typography fontWeight="bold">{getClientName(client)}</Typography>
-                            <Typography variant="body2" color={clientId ? "success.main" : "error.main"}>
-                              {clientId ? "✓ Active client" : "✗ Missing client ID"}
-                            </Typography>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </Stack>
-              )}
+              <Typography color="text.secondary">Total Plans</Typography>
+              <Typography variant="h4" fontWeight="bold">{programData.length}</Typography>
             </CardContent>
           </Card>
         </Grid>
-
-        {/* تفاصيل البرامج */}
-        <Grid item xs={12} md={8}>
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={12} sm={6}>
-              <Card><CardContent><Typography color="text.secondary">Total Plans</Typography><Typography variant="h4" fontWeight="bold">{programData.length}</Typography></CardContent></Card>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Card><CardContent><Typography color="text.secondary">Active Plans</Typography><Typography variant="h4" fontWeight="bold">{activePlans}</Typography></CardContent></Card>
-            </Grid>
-          </Grid>
-
+        <Grid item xs={12} sm={6}>
           <Card>
             <CardContent>
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3, gap: 2, flexWrap: "wrap" }}>
-                <Box>
-                  <Typography variant="h5" fontWeight="bold">{selectedClient ? getClientName(selectedClient) : "Select a client"}</Typography>
-                  <Typography color="text.secondary">Meal plans and program details</Typography>
-                </Box>
-                <Button variant="contained" startIcon={<AddIcon />} disabled={!getClientId(selectedClient)} onClick={() => { setDialogMode("addPlan"); setOpenDialog(true); }}>Add Plan</Button>
-              </Box>
-
-              {loadingPlans ? (
-                <Box sx={{ textAlign: "center", py: 5 }}><CircularProgress /></Box>
-              ) : !selectedClient ? (
-                <Typography textAlign="center" color="text.secondary" sx={{ py: 5 }}>Select a client from the left to view their programs.</Typography>
-              ) : programData.length === 0 ? (
-                <Typography textAlign="center" color="text.secondary" sx={{ py: 5 }}>No programs found for this client. Click "Add Plan" to create one.</Typography>
-              ) : (
-                <Grid container spacing={2}>
-                  {programData.map((plan, index) => {
-                    const planId = getPlanId(plan);
-                    const status = getPlanStatus(plan);
-                    return (
-                      <Grid item xs={12} sm={6} key={planId || index}>
-                        <Card sx={{ border: "1px solid #e5e7eb" }}>
-                          <CardContent>
-                            <Stack spacing={2}>
-                              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-                                <Typography variant="h6" fontWeight="bold">{getPlanTitle(plan)}</Typography>
-                                <Chip label={status} color={getStatusColor(status)} size="small" />
-                              </Box>
-                              <Typography color="text.secondary">Start Date: {getPlanStartDate(plan)}</Typography>
-                              <Stack direction="row" spacing={1}>
-                                <Button variant="contained" startIcon={<VisibilityIcon />} disabled={!planId} onClick={() => handleViewPlan(planId)}>View</Button>
-                                {String(status).toLowerCase() !== "active" && (
-                                  <Button variant="outlined" startIcon={<CheckCircleIcon />} disabled={!planId} onClick={() => handleActivatePlan(planId)}>Activate</Button>
-                                )}
-                              </Stack>
-                            </Stack>
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              )}
+              <Typography color="text.secondary">Active Plans</Typography>
+              <Typography variant="h4" fontWeight="bold">{activePlans}</Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
+
+      {loadingPlans ? (
+        <Box sx={{ textAlign: "center", py: 5 }}><CircularProgress /></Box>
+      ) : programData.length === 0 ? (
+        <Card>
+          <CardContent>
+            <Typography textAlign="center" color="text.secondary" sx={{ py: 5 }}>
+              No programs found. Click "Add Plan" to create one.
+            </Typography>
+          </CardContent>
+        </Card>
+      ) : (
+        <Grid container spacing={2}>
+          {programData.map((plan, index) => {
+            const planId = getPlanId(plan);
+            const status = getPlanStatus(plan);
+            return (
+              <Grid item xs={12} sm={6} md={4} key={planId || index}>
+                <Card sx={{ border: "1px solid #e5e7eb" }}>
+                  <CardContent>
+                    <Stack spacing={2}>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                        <Typography variant="h6" fontWeight="bold">{getPlanTitle(plan)}</Typography>
+                        <Chip label={status} color={getStatusColor(status)} size="small" />
+                      </Box>
+                      <Typography color="text.secondary">Start Date: {getPlanStartDate(plan)}</Typography>
+                      <Stack direction="row" spacing={1}>
+                        <Button variant="contained" startIcon={<VisibilityIcon />} disabled={!planId} onClick={() => handleViewPlan(planId)}>View</Button>
+                        {String(status).toLowerCase() !== "active" && (
+                          <Button variant="outlined" startIcon={<CheckCircleIcon />} disabled={!planId} onClick={() => handleActivatePlan(planId)}>Activate</Button>
+                        )}
+                      </Stack>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
+        </Grid>
+      )}
 
       {/* Dialog إضافة خطة */}
       <Dialog open={openDialog && dialogMode === "addPlan"} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
@@ -613,6 +596,14 @@ export default function Programs() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 2 }}>
+            <TextField
+              label="Client ID (GUID)"
+              fullWidth
+              placeholder="أدخل الـ Client ID الخاص بالعميل"
+              value={manualClientId}
+              onChange={(e) => setManualClientId(e.target.value)}
+              helperText="اتركه فارغاً لاستخدام العميل المحدد"
+            />
             <TextField label="Plan Title" fullWidth value={newPlan.title} onChange={(e) => setNewPlan({ ...newPlan, title: e.target.value })} />
             <TextField label="Start Date" type="date" fullWidth InputLabelProps={{ shrink: true }} value={newPlan.StartDate} onChange={(e) => setNewPlan({ ...newPlan, StartDate: e.target.value })} />
           </Stack>
@@ -676,47 +667,94 @@ export default function Programs() {
         <DialogContent>
           {selectedPlan && (
             <Stack spacing={2} sx={{ mt: 2 }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
                 <Box>
                   <Typography variant="h5" fontWeight="bold">{getPlanTitle(selectedPlan)}</Typography>
                   <Typography color="text.secondary">Start Date: {getPlanStartDate(selectedPlan)}</Typography>
                 </Box>
-                <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setDialogMode("addDay"); setOpenDialog(true); }}>Add Day</Button>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setDialogMode("addDay"); setOpenDialog(true); }}>
+                  Add Day
+                </Button>
               </Box>
               <Divider />
               {getDays(selectedPlan).length === 0 ? (
-                <Typography color="text.secondary">No days added yet.</Typography>
+                <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>No days added yet. Click "Add Day" to start.</Typography>
               ) : (
                 getDays(selectedPlan).map((day, index) => (
-                  <Card key={getDayId(day) || index} sx={{ border: "1px solid #e5e7eb" }}>
+                  <Card key={getDayId(day) || index} sx={{ border: "1px solid #e5e7eb", mb: 2 }}>
                     <CardContent>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
                         <Box>
                           <Typography variant="h6" fontWeight="bold">Day {getDayNumber(day)}</Typography>
                           <Typography color="text.secondary">{day.notes || day.Notes || "No notes"}</Typography>
                         </Box>
                         <Stack direction="row" spacing={1}>
-                          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedDay(day); setMealForm({ MealType: "Breakfast", MealName: "", MealDescription: "", OrderIndex: 0 }); setDialogMode("addMeal"); setOpenDialog(true); }}>Meal</Button>
-                          <IconButton color="error" onClick={() => handleDeleteDay(getDayId(day))}><DeleteIcon /></IconButton>
+                          <Button 
+                            size="small" 
+                            variant="contained" 
+                            startIcon={<AddIcon />} 
+                            onClick={() => { 
+                              setSelectedDay(day); 
+                              setMealForm({ MealType: "Breakfast", MealName: "", MealDescription: "", OrderIndex: 0 }); 
+                              setDialogMode("addMeal"); 
+                              setOpenDialog(true); 
+                            }}
+                          >
+                            Add Meal
+                          </Button>
+                          <IconButton color="error" onClick={() => handleDeleteDay(getDayId(day))}>
+                            <DeleteIcon />
+                          </IconButton>
                         </Stack>
                       </Box>
                       <Divider sx={{ my: 2 }} />
                       {getMeals(day).length === 0 ? (
-                        <Typography color="text.secondary">No meals added.</Typography>
+                        <Typography color="text.secondary" sx={{ py: 2, textAlign: "center" }}>No meals added. Click "Add Meal" to start.</Typography>
                       ) : (
-                        <Stack spacing={1}>
+                        <Stack spacing={1.5}>
                           {getMeals(day).map((meal, mealIndex) => (
                             <Card key={getMealId(meal) || mealIndex} sx={{ bgcolor: "#fafafa" }}>
-                              <CardContent sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-                                <Box>
-                                  <Typography fontWeight="bold">{meal.mealName || meal.MealName}</Typography>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {meal.mealType || meal.MealType} - {meal.mealDescription || meal.MealDescription || "No description"}
+                              <CardContent sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+                                <Box sx={{ flex: 1 }}>
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                                    <Chip label={meal.mealType || meal.MealType || "Meal"} size="small" color="primary" variant="outlined" />
+                                    <Typography variant="subtitle1" fontWeight="bold">
+                                      {meal.mealName || meal.MealName}
+                                    </Typography>
+                                    {meal.orderIndex !== undefined && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Order: {meal.orderIndex}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                    {meal.mealDescription || meal.MealDescription || "No description"}
                                   </Typography>
                                 </Box>
-                                <Stack direction="row" spacing={1}>
-                                  <IconButton onClick={() => { setSelectedMeal(meal); setMealForm({ MealType: meal.mealType || meal.MealType || "Breakfast", MealName: meal.mealName || meal.MealName || "", MealDescription: meal.mealDescription || meal.MealDescription || "", OrderIndex: meal.orderIndex || meal.OrderIndex || 0 }); setDialogMode("editMeal"); setOpenDialog(true); }}><EditIcon /></IconButton>
-                                  <IconButton color="error" onClick={() => handleDeleteMeal(getMealId(meal))}><DeleteIcon /></IconButton>
+                                <Stack direction="row" spacing={0.5}>
+                                  <IconButton 
+                                    size="small"
+                                    onClick={() => { 
+                                      setSelectedMeal(meal); 
+                                      setMealForm({ 
+                                        MealType: meal.mealType || meal.MealType || "Breakfast", 
+                                        MealName: meal.mealName || meal.MealName || "", 
+                                        MealDescription: meal.mealDescription || meal.MealDescription || "", 
+                                        OrderIndex: meal.orderIndex || meal.OrderIndex || 0 
+                                      }); 
+                                      setDialogMode("editMeal"); 
+                                      setOpenDialog(true); 
+                                    }}
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton 
+                                    size="small"
+                                    color="error" 
+                                    onClick={() => handleDeleteMeal(getMealId(meal))}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
                                 </Stack>
                               </CardContent>
                             </Card>

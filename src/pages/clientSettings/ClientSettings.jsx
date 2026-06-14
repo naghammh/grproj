@@ -3,21 +3,25 @@ import {
   Box, Typography, Card, CardContent, TextField, Button, Avatar, Switch,
   Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   IconButton, InputAdornment, Snackbar, Alert, Chip, CircularProgress,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
 } from "@mui/material";
 import {
   PhotoCamera, Visibility, VisibilityOff, Logout, DeleteForever,
   LightMode, DarkMode, Person, Lock, Palette, Warning, Save, Key,
+  Cancel, Subscriptions,
 } from "@mui/icons-material";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { ThemeModeContext } from "../../App";
 
 const BASE_URL = "https://nutrilife.runasp.net/api/Account";
+const SUBSCRIPTION_BASE = "https://nutrilife.runasp.net/api/Subscription";
 
 export default function ClientSettings() {
   const navigate = useNavigate();
   const { darkMode, onThemeToggle } = useContext(ThemeModeContext);
 
+  // --- بيانات المستخدم ---
   const [user, setUser] = useState(null);
   const [form, setForm] = useState({ userName: "", email: "" });
   const [avatarPreview, setAvatarPreview] = useState(null);
@@ -25,17 +29,26 @@ export default function ClientSettings() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // --- تغيير كلمة المرور ---
   const [passwords, setPasswords] = useState({ current: "", newPass: "", confirm: "" });
   const [showPasswords, setShowPasswords] = useState({ current: false, newPass: false, confirm: false });
 
+  // --- حوارات الخروج وحذف الحساب ---
   const [logoutDialog, setLogoutDialog] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [showDeletePassword, setShowDeletePassword] = useState(false);
 
+  // --- الاشتراكات النشطة ---
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
+
+  // --- Snackbar ---
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const showSnack = (message, severity = "success") => setSnackbar({ open: true, message, severity });
 
+  // --- دوال مساعدة ---
   const getUserIdFromToken = () => {
     const token = localStorage.getItem("token");
     if (!token) return null;
@@ -47,7 +60,56 @@ export default function ClientSettings() {
     }
   };
 
-  // ─── رفع الصورة إلى الخادم (مع تخزين Base64 محلياً) ──────────────────────────
+  // --- جلب الاشتراكات النشطة ---
+  const fetchActiveSubscriptions = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const userId = getUserIdFromToken();
+    if (!userId) return;
+    setLoadingSubscriptions(true);
+    try {
+      const response = await axios.get(`${SUBSCRIPTION_BASE}/clientHistory/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const active = response.data.filter(sub => {
+        const status = (sub.status || sub.Status || "").toLowerCase();
+        return status === "active";
+      });
+      setSubscriptions(active);
+    } catch (err) {
+      console.error("Error fetching subscriptions:", err);
+      showSnack("فشل تحميل الاشتراكات النشطة", "error");
+    } finally {
+      setLoadingSubscriptions(false);
+    }
+  };
+
+  // --- إلغاء اشتراك معين ---
+  const handleCancelSubscription = async (subscriptionId) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      showSnack("الرجاء تسجيل الدخول أولاً", "error");
+      return;
+    }
+    setCancellingId(subscriptionId);
+    try {
+      await axios.put(`${SUBSCRIPTION_BASE}/cancel/${subscriptionId}`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      showSnack("تم إلغاء الاشتراك بنجاح", "success");
+      setSubscriptions(prev => prev.filter(sub => (sub.subscriptionId || sub.id) !== subscriptionId));
+      // إشعار الصفحات الأخرى بالتغيير
+      localStorage.setItem('subscriptionsChanged', Date.now().toString());
+    } catch (err) {
+      console.error("Cancel error:", err);
+      const msg = err.response?.data?.message || "فشل إلغاء الاشتراك";
+      showSnack(msg, "error");
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  // --- دوال الصورة الشخصية ---
   const addProfileImage = async (file) => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
@@ -56,10 +118,9 @@ export default function ClientSettings() {
     const response = await axios.post(`${BASE_URL}/addprofileimg`, formData, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    return response.data; // نتوقع أن يعيد { profileImage, profileImageUrl }
+    return response.data;
   };
 
-  // ─── حذف الصورة من الخادم (حتى لو 404، نعتبرها ناجحة محلياً) ─────────────────
   const deleteProfileImage = async () => {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
@@ -68,51 +129,10 @@ export default function ClientSettings() {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch (error) {
-      // حتى لو فشل الحذف على الخادم، نكمل الحذف محلياً
       console.log("Delete endpoint failed, continuing locally");
     }
   };
 
-  // ─── تحديث بيانات المستخدم ─────────────────────────────────────────────
-  const updateProfileData = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) throw new Error("No token found");
-    const userId = getUserIdFromToken();
-    const response = await axios.put(
-      `${BASE_URL}/editClient/${userId}`,
-      {
-        UserName: form.userName,
-        FullName: user.fullName || "",
-        PhoneNumber: user.phoneNumber || "",
-        Gender: user.gender || "",
-        DOF: user.dof || "",
-        Height: user.height || 0,
-        Weight: user.weight || 0,
-        Disease: user.disease || "",
-        Goal: user.goal || "",
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    return response.data;
-  };
-
-  // ─── تغيير كلمة المرور ─────────────────────────────────────────────────
-  const changePasswordAPI = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) throw new Error("No token found");
-    if (!user?.email) throw new Error("User email not found");
-    const payload = {
-      Email: user.email,
-      OldPassword: passwords.current,
-      NewPassword: passwords.newPass,
-    };
-    const response = await axios.put(`${BASE_URL}/ChangePass`, payload, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.data;
-  };
-
-  // ─── تحميل الصورة المخزنة محلياً (Base64) ──────────────────────────────
   const loadProfileImageFromLocal = () => {
     const storedBase64 = localStorage.getItem("profileImageBase64");
     if (storedBase64) {
@@ -122,36 +142,6 @@ export default function ClientSettings() {
     }
   };
 
-  // ─── تحميل بيانات المستخدم عند بدء التشغيل ──────────────────────────────
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
-    const loadUser = async () => {
-      try {
-        const userId = getUserIdFromToken();
-        if (!userId) {
-          showSnack("Unable to verify user identity.", "error");
-          return;
-        }
-        const response = await axios.get(`${BASE_URL}/GetClient/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const currentUser = response.data;
-        if (currentUser) {
-          setUser(currentUser);
-          setForm({ userName: currentUser.userName || "", email: currentUser.email || "" });
-        }
-        // تحميل الصورة من localStorage
-        loadProfileImageFromLocal();
-      } catch (err) {
-        console.error("Error loading user data:", err);
-        showSnack(err.response?.data?.message || "Failed to load user data.", "error");
-      }
-    };
-    loadUser();
-  }, []);
-
-  // ─── معالج رفع الصورة (حذف قديمة، رفع جديدة، حفظ Base64 محلياً) ──────────
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -164,7 +154,6 @@ export default function ClientSettings() {
       return;
     }
 
-    // معاينة محلية فورية وتحويل إلى Base64
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result;
@@ -175,19 +164,16 @@ export default function ClientSettings() {
 
     setUploadingImage(true);
     try {
-      // 1. حذف القديمة (محاولة الخادم، تجاهل الفشل)
       try {
         await deleteProfileImage();
       } catch (deleteErr) {
         console.log("No existing image to delete or delete failed");
       }
-      // 2. رفع الجديدة إلى الخادم
       await addProfileImage(file);
       showSnack("تم تحديث صورة الملف الشخصي بنجاح! ✓", "success");
     } catch (error) {
       console.error("Upload error:", error);
       showSnack("فشل تحميل الصورة. حاول مرة أخرى.", "error");
-      // في حال الفشل، نرجع إلى الصورة القديمة إن وجدت
       const oldBase64 = localStorage.getItem("profileImageBase64");
       setAvatarPreview(oldBase64 || null);
     } finally {
@@ -195,11 +181,10 @@ export default function ClientSettings() {
     }
   };
 
-  // ─── حذف الصورة (محلياً ومع الخادم) ────────────────────────────────────
   const handleDeleteImage = async () => {
     setUploadingImage(true);
     try {
-      await deleteProfileImage(); // تجاهل الخطأ
+      await deleteProfileImage();
       localStorage.removeItem("profileImageBase64");
       setAvatarPreview(null);
       showSnack("تم حذف صورة الملف الشخصي بنجاح! ✓", "success");
@@ -211,7 +196,29 @@ export default function ClientSettings() {
     }
   };
 
-  // ─── بقية المعالجات (حفظ الملف الشخصي، تغيير كلمة المرور، تسجيل الخروج، حذف الحساب) ───
+  // --- تحديث بيانات الملف الشخصي ---
+  const updateProfileData = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("No token found");
+    const userId = getUserIdFromToken();
+    const response = await axios.put(
+      `${BASE_URL}/editClient/${userId}`,
+      {
+        UserName: form.userName,
+        FullName: user?.fullName || "",
+        PhoneNumber: user?.phoneNumber || "",
+        Gender: user?.gender || "",
+        DOF: user?.dof || "",
+        Height: user?.height || 0,
+        Weight: user?.weight || 0,
+        Disease: user?.disease || "",
+        Goal: user?.goal || "",
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return response.data;
+  };
+
   const handleSaveProfile = async () => {
     if (!form.userName.trim() || !form.email.trim()) {
       showSnack("الرجاء ملء جميع الحقول", "warning");
@@ -232,6 +239,22 @@ export default function ClientSettings() {
     } finally {
       setSavingProfile(false);
     }
+  };
+
+  // --- تغيير كلمة المرور ---
+  const changePasswordAPI = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) throw new Error("No token found");
+    if (!user?.email) throw new Error("User email not found");
+    const payload = {
+      Email: user.email,
+      OldPassword: passwords.current,
+      NewPassword: passwords.newPass,
+    };
+    const response = await axios.put(`${BASE_URL}/ChangePass`, payload, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
   };
 
   const handleChangePassword = async () => {
@@ -269,12 +292,7 @@ export default function ClientSettings() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("profileImageBase64");
-    navigate("/login");
-  };
-
+  // --- حذف الحساب ---
   const handleDelete = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -311,7 +329,56 @@ export default function ClientSettings() {
     }
   };
 
-  // ─── مكونات واجهة المستخدم ─────────────────────────────────────────────
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("profileImageBase64");
+    navigate("/login");
+  };
+
+  // --- تأثيرات التحميل والتحديث عند التركيز ---
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const loadUser = async () => {
+      try {
+        const userId = getUserIdFromToken();
+        if (!userId) {
+          showSnack("Unable to verify user identity.", "error");
+          return;
+        }
+        const response = await axios.get(`${BASE_URL}/GetClient/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const currentUser = response.data;
+        if (currentUser) {
+          setUser(currentUser);
+          setForm({ userName: currentUser.userName || "", email: currentUser.email || "" });
+        }
+        loadProfileImageFromLocal();
+      } catch (err) {
+        console.error("Error loading user data:", err);
+        showSnack(err.response?.data?.message || "Failed to load user data.", "error");
+      }
+    };
+    loadUser();
+    fetchActiveSubscriptions();
+  }, []);
+
+  // إعادة جلب الاشتراكات عند التركيز على الصفحة أو عند تغير localStorage
+  useEffect(() => {
+    const refresh = () => fetchActiveSubscriptions();
+    window.addEventListener('focus', refresh);
+    const handleStorageChange = (e) => {
+      if (e.key === 'subscriptionsChanged') refresh();
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  // --- مكونات واجهة المستخدم ---
   const SectionHeader = ({ icon, title, subtitle }) => (
     <Box display="flex" alignItems="center" gap={1.5} mb={3}>
       <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: "#2e7d32", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>{icon}</Box>
@@ -387,6 +454,63 @@ export default function ClientSettings() {
           <Button variant="outlined" sx={greenOutlinedSx} onClick={handleChangePassword} disabled={changingPassword} startIcon={changingPassword ? <CircularProgress size={20} color="inherit" /> : <Key />}>
             {changingPassword ? "جاري التغيير..." : "Update Password"}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* ACTIVE SUBSCRIPTIONS */}
+      <Card sx={cardSx}>
+        <CardContent sx={{ p: 3 }}>
+          <SectionHeader icon={<Subscriptions fontSize="small" />} title="Active Subscriptions" subtitle="Manage your current plans" />
+          {loadingSubscriptions ? (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress size={32} sx={{ color: "#2e7d32" }} />
+            </Box>
+          ) : subscriptions.length === 0 ? (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>You have no active subscriptions at the moment.</Alert>
+          ) : (
+            <TableContainer component={Paper} sx={{ bgcolor: "background.default", boxShadow: "none", border: "1px solid", borderColor: "divider" }}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell><strong>Plan</strong></TableCell>
+                    <TableCell><strong>Status</strong></TableCell>
+                    <TableCell><strong>Start Date</strong></TableCell>
+                    <TableCell align="center"><strong>Action</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {subscriptions.map((sub) => {
+                    const subId = sub.subscriptionId || sub.id;
+                    const planName = sub.planName || sub.PlanName || sub.userPlanName || "-";
+                    const startDate = sub.startDate || sub.StartDate || "-";
+                    return (
+                      <TableRow key={subId}>
+                        <TableCell>{planName}</TableCell>
+                        <TableCell><Chip label="Active" size="small" color="success" /></TableCell>
+                        <TableCell>{startDate}</TableCell>
+                        <TableCell align="center">
+                          <Button
+                            variant="outlined"
+                            color="error"
+                            size="small"
+                            startIcon={<Cancel />}
+                            disabled={cancellingId === subId}
+                            onClick={() => {
+                              if (window.confirm("Are you sure you want to cancel this subscription? This action cannot be undone.")) {
+                                handleCancelSubscription(subId);
+                              }
+                            }}
+                          >
+                            {cancellingId === subId ? <CircularProgress size={20} /> : "Cancel"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
         </CardContent>
       </Card>
 
